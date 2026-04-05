@@ -342,6 +342,56 @@ export function schedulePositionMonitor() {
   });
 }
 
+// ── 每5分钟：自动化盯盘分析（指标事件触发 AI 推送）──────────
+export function scheduleAutoAnalyst() {
+  return cron.schedule('*/5 * * * *', async () => {
+    if (!isMarketOpen()) return;
+    try {
+      const { runAutoAnalyst } = await import('../processors/monitor/auto-analyst');
+      await runAutoAnalyst();
+    } catch (err) {
+      logger.error('[scheduler] auto-analyst failed', { err });
+    }
+  });
+}
+
+// ── 每5分钟：持仓动态建议（止盈里程碑/信号反转/超时）────────��
+export function schedulePositionAdvisor() {
+  return cron.schedule('*/5 * * * *', async () => {
+    try {
+      const { getOpenPositions, getLatestPrice } = await import('../storage/dao');
+      const positions = getOpenPositions() as Array<Record<string, unknown>>;
+      if (positions.length === 0) return;
+      const price = getLatestPrice() as Record<string, number> | null;
+      const cnyG  = price?.['xau_cny_g'];
+      if (!cnyG) return;
+      const { runPositionAdvisor } = await import('../processors/monitor/position-advisor');
+      await runPositionAdvisor(positions, cnyG);
+    } catch (err) {
+      logger.error('[scheduler] position-advisor failed', { err });
+    }
+  });
+}
+
+// ── 盘中快报：09:30 / 13:30 / 21:30 ─────────────────────────
+export function scheduleIntradayBrief() {
+  // 三个时间点：亚盘开盘、午盘恢复、美盘开盘
+  return [
+    cron.schedule('30 9  * * 1-5', async () => {
+      const { generateIntradayBrief } = await import('../processors/ai/intraday-brief');
+      await generateIntradayBrief();
+    }),
+    cron.schedule('30 13 * * 1-5', async () => {
+      const { generateIntradayBrief } = await import('../processors/ai/intraday-brief');
+      await generateIntradayBrief();
+    }),
+    cron.schedule('30 21 * * 1-5', async () => {
+      const { generateIntradayBrief } = await import('../processors/ai/intraday-brief');
+      await generateIntradayBrief();
+    }),
+  ];
+}
+
 // ── 每1分钟：价格异动监控（急涨/急跌预警）────────────────────
 export function schedulePriceSpikeMonitor() {
   return cron.schedule('* * * * *', async () => {
@@ -481,6 +531,9 @@ export function startAllSchedulers(): cron.ScheduledTask[] {
     scheduleSignalMonitor(),    // 每30分钟信号推送
     schedulePositionMonitor(),  // 每5分钟持仓止损监控
     schedulePriceSpikeMonitor(), // 每分钟价格异动检测
+    scheduleAutoAnalyst(),      // 每5分钟技术指标触发AI自动分析
+    schedulePositionAdvisor(),  // 每5分钟持仓动态建议
+    ...scheduleIntradayBrief(), // 09:30/13:30/21:30 盘中快报
   ];
   logger.info('[scheduler] all tasks started', { count: tasks.length });
   return tasks;

@@ -81,9 +81,15 @@ const SYSTEM_PROMPT = `你是 Gold Sentinel 的首席黄金交易员，同时具
 3-4:  逻辑不足或与当前行情明显背离
 1-2:  强烈反对，存在重大误判风险
 
+**⚠️ 价格单位强制要求（极其重要）：**
+- entry、stopLoss、target、keyLevels 中的 price 字段，全部必须使用【人民币元/克（CNY/g）】单位
+- 绝对禁止使用 USD/oz（美元/盎司）或其他单位
+- 积存金当前价格约在 ¥600～¥900/g 区间，请据此判断价格合理性
+- 上下文中的"XAU/CNY: ¥XXX/g"字段即为当前参考价，所有价格输出必须贴近该值
+- 若出现疑似 USD/oz 数值（如3000以上的大数），视为错误，请换算后重新输出
+
 **分析要求：**
 - 支撑理由和风险必须引用具体数据（如"RSI=28，接近超卖区间"）
-- 价格建议基于积存金CNY/g单位，须贴近当前实际价格
 - 止损距离建议不超过1%，目标价看最近阻力位`;
 
 // ── 数据收集 ─────────────────────────────────────────────────
@@ -299,6 +305,33 @@ ${content}
   if (!jsonMatch) throw new Error('Idea analyzer: no JSON in response');
 
   const result = JSON.parse(jsonMatch[0]) as IdeaAnalysisResult;
+
+  // 后处理：自动纠正价格单位混淆（AI 可能将 USD/oz 误作 CNY/g 输出）
+  // 积存金正常价格区间 ¥600-¥900/g；若输出超过 ¥2000，判定为 USD/oz，执行换算
+  const currentCnyG = price?.['xau_cny_g'] ?? 750;
+  const usdCnyRate  = price?.['usd_cny']  ?? 7.25;
+  const suspectThreshold = Math.max(currentCnyG * 2, 2000);
+
+  function fixPriceUnit(val: number | null | undefined): number | null {
+    if (val == null) return null;
+    if (val > suspectThreshold) {
+      // 判定为 USD/oz，转 CNY/g
+      const fixed = parseFloat(((val * usdCnyRate) / 31.1035).toFixed(2));
+      logger.warn('[idea-analyzer] price unit auto-corrected (USD/oz→CNY/g)', { original: val, fixed });
+      return fixed;
+    }
+    return val;
+  }
+
+  result.entry    = fixPriceUnit(result.entry);
+  result.stopLoss = fixPriceUnit(result.stopLoss);
+  result.target   = fixPriceUnit(result.target);
+  if (Array.isArray(result.keyLevels)) {
+    result.keyLevels = result.keyLevels.map(kl => ({
+      ...kl,
+      price: fixPriceUnit(kl.price) ?? kl.price,
+    }));
+  }
 
   // 写回分析结果
   updateIdeaAnalysis(

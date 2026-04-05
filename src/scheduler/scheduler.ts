@@ -6,7 +6,7 @@ import cron from 'node-cron';
 import logger from '../utils/logger';
 import config from '../config';
 import { broadcast } from '../api/server';
-import { insertPrice, upsertInventory, upsertETFHolding, upsertMacroData, insertNews, cleanupOldMinuteData } from '../storage/dao';
+import { insertPrice, upsertInventory, upsertETFHolding, upsertMacroData, insertNews, cleanupOldMinuteData, upsertDailyOHLCV } from '../storage/dao';
 import { aggregatePrices } from '../collectors/price/price-aggregator';
 import { fetchCOMEXFutures } from '../collectors/price/comex-futures.collector';
 import { fetchCOMEXInventory } from '../collectors/inventory/comex-inventory.collector';
@@ -444,6 +444,21 @@ export function scheduleAIDailySummary() {
   });
 }
 
+// ── 每日 00:05：日线 OHLCV 聚合（写入 prices_daily）────────────
+export function scheduleDailyOHLCV() {
+  return cron.schedule('5 0 * * *', () => {
+    // 聚合昨天的分钟数据为日线 OHLCV
+    const yesterday = new Date(Date.now() - 86400000);
+    const dateStr = yesterday.toISOString().slice(0, 10); // YYYY-MM-DD
+    try {
+      upsertDailyOHLCV(dateStr);
+      logger.info('[scheduler] daily OHLCV aggregated', { date: dateStr });
+    } catch (err) {
+      logger.error('[scheduler] daily OHLCV aggregation failed', { err, date: dateStr });
+    }
+  });
+}
+
 // ── 每日 03:00：数据清理 (T-204) ─────────────────────────────
 export function scheduleCleanup() {
   return cron.schedule('0 3 * * *', () => {
@@ -461,6 +476,7 @@ export function startAllSchedulers(): cron.ScheduledTask[] {
     scheduleDailyBrief(),
     scheduleWeeklyCOT(),
     scheduleAIDailySummary(),   // 每日2点 AI 提示词总结
+    scheduleDailyOHLCV(),       // 每日00:05 日线OHLCV聚合
     scheduleCleanup(),
     scheduleSignalMonitor(),    // 每30分钟信号推送
     schedulePositionMonitor(),  // 每5分钟持仓止损监控

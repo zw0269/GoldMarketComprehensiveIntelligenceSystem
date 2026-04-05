@@ -44,7 +44,7 @@ export async function fetchMetalpriceData(): Promise<IPriceData | null> {
         source: 'metalprice',
         timestamp: timestamp * 1000,
         xauUsd,
-        xauCny: xauCny / 32.1507,  // 转换为 CNY/g
+        xauCny: xauCny / 31.1035,  // 转换为 CNY/g（1 troy oz = 31.1035 g）
         usdCny,
       } satisfies IPriceData;
     },

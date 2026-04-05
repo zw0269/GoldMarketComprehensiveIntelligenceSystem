@@ -19,7 +19,10 @@
     <div class="overlay" v-if="loading">
       <span class="loading-dot">●</span> 加载历史数据...
     </div>
-    <div class="overlay error" v-if="error">⚠️ {{ error }}</div>
+    <div class="overlay error" v-if="error">
+      ⚠️ {{ error }}
+      <button class="retry-btn" @click="loadData">重试</button>
+    </div>
   </div>
 </template>
 
@@ -194,7 +197,12 @@ watch(activeRange, () => chart?.resize());
   background: rgba(13,13,26,0.7); font-size: 13px; color: #888;
   border-radius: 6px;
 }
-.overlay.error { color: #FF6D00; }
+.overlay.error { color: #FF6D00; flex-direction: column; gap: 10px; }
+.retry-btn {
+  padding: 5px 16px; border-radius: 4px; border: 1px solid #FF6D00;
+  background: transparent; color: #FF6D00; font-size: 12px; cursor: pointer;
+}
+.retry-btn:hover { background: rgba(255,109,0,0.1); }
 .loading-dot { animation: blink 1s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
 </style>

@@ -135,6 +135,19 @@ export async function callClaude(
   const startMs = Date.now();
   let response = '';
 
+  // 用户交互型任务（idea/chat）不重试，避免等待时间叠加；后台批量任务保留重试
+  const isInteractive = contextType === 'idea' || contextType === 'chat';
+  const retryOptions = {
+    maxAttempts: isInteractive ? 1 : 3,
+    baseDelayMs: 5000,
+    retryOn: (err: unknown) => {
+      if (err instanceof Error) {
+        return !err.message.includes('401') && !err.message.includes('403');
+      }
+      return true;
+    },
+  };
+
   try {
     response = await withRetry(
       async () => {
@@ -144,16 +157,7 @@ export async function callClaude(
         return callAnthropicAPI(systemPrompt, userMessage, maxTokens);
       },
       hasCustom ? `CustomAI(${config.api.aiCustomModel})` : `Anthropic(${config.api.aiModel})`,
-      {
-        maxAttempts: 3,
-        baseDelayMs: 5000,
-        retryOn: (err) => {
-          if (err instanceof Error) {
-            return !err.message.includes('401') && !err.message.includes('403');
-          }
-          return true;
-        },
-      }
+      retryOptions
     );
   } finally {
     // 异步写日志，不阻塞主流程

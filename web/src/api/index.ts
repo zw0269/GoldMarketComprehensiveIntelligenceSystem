@@ -42,7 +42,7 @@ export const api = {
   getTradeStats: () => http.get('/api/positions/stats').then(r => r.data),
   // AI 问答
   chatWithAI: (question: string, history?: Array<{ role: string; content: string }>) =>
-    http.post('/api/ai/chat', { question, history }, { timeout: 60000 }).then(r => r.data),
+    http.post('/api/ai/chat', { question, history }, { timeout: 600000 }).then(r => r.data),
   // AI 每日总结
   getAIDailySummaries: () => http.get('/api/ai/summaries').then(r => r.data),
 };

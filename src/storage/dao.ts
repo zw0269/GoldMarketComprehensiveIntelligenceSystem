@@ -55,6 +55,34 @@ export function getDailyOHLCV(days = 365): Record<string, unknown>[] {
   ).all(days) as Record<string, unknown>[];
 }
 
+/** 将某一天的分钟价格数据聚合为 OHLCV 日线写入 prices_daily */
+export function upsertDailyOHLCV(date: string): void {
+  const db = getDB();
+  // 取该日所有分钟数据
+  const startTs = new Date(date + 'T00:00:00+08:00').getTime();
+  const endTs   = startTs + 86400000; // +24h
+  const rows = db.prepare(
+    'SELECT xau_usd, xau_cny_g, usd_cny FROM prices WHERE ts >= ? AND ts < ? ORDER BY ts ASC'
+  ).all(startTs, endTs) as Array<{ xau_usd: number; xau_cny_g: number | null; usd_cny: number | null }>;
+
+  if (rows.length === 0) return;
+
+  const prices = rows.map(r => r.xau_usd).filter(Boolean);
+  if (prices.length === 0) return;
+
+  const open   = prices[0];
+  const close  = prices[prices.length - 1];
+  const high   = Math.max(...prices);
+  const low    = Math.min(...prices);
+  const xauCnyG = rows[rows.length - 1].xau_cny_g ?? null;
+  const usdCny  = rows[rows.length - 1].usd_cny  ?? null;
+
+  db.prepare(`
+    INSERT OR REPLACE INTO prices_daily (date, open, high, low, close, volume, xau_cny_g, usd_cny)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(date, open, high, low, close, prices.length, xauCnyG, usdCny);
+}
+
 // ── 库存 ─────────────────────────────────────────────────────
 
 export function upsertInventory(inv: IInventoryData): void {

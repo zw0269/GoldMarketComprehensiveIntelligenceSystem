@@ -2,7 +2,7 @@
 
 > 项目：黄金市场全景情报系统（积存金短线交易辅助）
 > 技术栈：Node.js + TypeScript + SQLite + Vue 3 + ECharts + Claude API
-> 最后更新：2026-04-05（会话8）
+> 最后更新：2026-04-05（会话9）
 
 ---
 
@@ -276,6 +276,26 @@ CREATE TABLE ai_interaction_log (
 
 ---
 
+### 会话 9 — 2026-04-05：多项 Bug 修复 + 多角色代码审查
+
+**背景：** 用户反馈4个问题：历史行情显示异常、AI分析超时、价格单位错误（¥3088/克）、AI助手无回复。进行全量代码审查，生成 `todolist.md`，共定位并修复 6 个 Bug。
+
+| 操作 | 涉及文件 | 说明 |
+|------|---------|------|
+| 修复 `submitIdea` 超时 | `web/src/api/index.ts` | 默认实例 10s → 600000ms（10分钟） |
+| 修复 AI 自定义端点超时 | `src/processors/ai/claude-client.ts` | callCustomEndpoint timeout 60s → 600000ms |
+| 历史行情降级 | `src/api/server.ts` | Yahoo Finance 被墙时降级读本地 `prices_daily` |
+| 强化 AI 价格单位约束 | `src/processors/ai/idea-analyzer.ts` | Prompt 明确禁止 USD/oz 输出；后处理自动纠正超阈值价格（entry/stopLoss/target > ¥2000 时按 USD/oz 换算） |
+| 修复 AI 助手超时 | `web/src/api/index.ts` | chatWithAI timeout 60s → 600000ms |
+| 新增日线 OHLCV 聚合 | `src/storage/dao.ts` | 新增 `upsertDailyOHLCV(date)` 函数 |
+| 新增调度任务 | `src/scheduler/scheduler.ts` | 每日 00:05 运行 `scheduleDailyOHLCV()`，聚合昨日分钟数据写入 `prices_daily` |
+| 修正 troy oz 换算系数 | `src/collectors/price/metalprice.collector.ts` | `32.1507` → `31.1035`（g/troy oz） |
+| 历史行情增加重试按钮 | `web/src/components/HistoricalChart.vue` | 错误状态增加"重试"按钮，点击重新拉取 |
+| AI 重试策略差异化 | `src/processors/ai/claude-client.ts` | idea/chat 类型 `maxAttempts=1`，后台批量任务保留3次重试 |
+| 新增 `todolist.md` | 项目根目录 | 6项 Bug 清单，含根因分析、修复方案、完成状态 |
+
+---
+
 ### 会话 8 — 2026-04-05：接入 Truth Social（Trump 原发帖）信息源
 
 **用户需求：** 监听 Trump 在 Truth Social 的发帖，纳入黄金市场情报采集范围。
@@ -323,6 +343,14 @@ CREATE TABLE ai_interaction_log (
 |------|------|------|------|
 | 2026-04-05 | `SQLITE_ERROR` 启动失败 | `cot_report` 表同时声明两个 `PRIMARY KEY` | 改为 `date TEXT NOT NULL UNIQUE`，删除旧 DB 重建 |
 | 2026-04-05 | `SignalPanel.vue` 500 Internal Server Error | Vue SFC Babel 不支持 `{map}[obj?.key ?? '']` | 改为 `const map={...}; return pos ? map[pos] : ''` |
+| 2026-04-05 | `分析失败：timeout of 10000ms exceeded` | `submitIdea` 使用默认 axios 实例（10s） | `web/src/api/index.ts` submitIdea 超时改为 600000ms |
+| 2026-04-05 | AI 自定义端点 timeout 60s 不足 | `claude-client.ts` callCustomEndpoint 写死 60000ms | 改为 600000ms（10 分钟） |
+| 2026-04-05 | 历史行情 `/api/price/historical` 503 | Yahoo Finance 在国内被墙 | 失败时降级读取本地 `prices_daily` 表 |
+| 2026-04-05 | AI 分析价格单位错误（¥3088/克 应为 ¥720/克） | GLM-4.7 将 USD/oz 数值误作 CNY/g 输出 | 加强 Prompt 单位约束 + 后处理自动检测并转换超阈值价格 |
+| 2026-04-05 | AI 助手无回复 | `chatWithAI` 前端超时仅 60s | `web/src/api/index.ts` chatWithAI 超时改为 600000ms |
+| 2026-04-05 | 历史行情降级后仍无数据 | `prices_daily` 表设计了但从未写入 | `dao.ts` 新增 `upsertDailyOHLCV()`，调度器每日 00:05 聚合日线 |
+| 2026-04-05 | MetalpriceAPI troy oz 换算误差 3.4% | `metalprice.collector.ts` 用 32.1507（troy oz/kg）而非 31.1035（g/oz） | 修正为 31.1035 |
+| 2026-04-05 | AI 重试3次总等待可达 30 分钟 | `withRetry maxAttempts=3` 对所有调用类型生效 | idea/chat 类型改为 `maxAttempts=1` |
 
 ---
 
@@ -445,7 +473,7 @@ Express + WebSocket，共计 **20+ 个路由**：
 | TypeScript 文件 | ~52个 |
 | Vue 组件 | 12个（新增 AIChat） |
 | API 路由 | 22+（新增 /ai/chat · /ai/summaries） |
-| 调度任务 | 12个（新增 AI总结 + 信号/持仓监控 + 急涨急跌预警） |
+| 调度任务 | 13个（新增 日线OHLCV聚合） |
 | 数据库表 | 13张（新增 ai_interaction_log · ai_daily_summary） |
 | 数据源 | 15+ |
 | 推送通道 | 3个（邮件/钉钉/Telegram） |

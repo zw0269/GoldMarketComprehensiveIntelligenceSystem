@@ -118,7 +118,7 @@ function renderChart() {
     yAxis: [
       {
         scale: true, gridIndex: 0,
-        axisLabel: { color: '#888', fontSize: 10, formatter: (v: number) => `$${v.toFixed(0)}` },
+        axisLabel: { color: '#888', fontSize: 10, formatter: (v: number) => `¥${v.toFixed(0)}` },
         splitLine: { lineStyle: { color: '#1a1a2e' } },
       },
       {

@@ -232,8 +232,6 @@ onMounted(async () => {
       latestPrice.value = p;
       if (p['xau_cny_g']) {
         cnyPrice.value = p['xau_cny_g'];
-        tradeLogRef.value?.updatePrice(p['xau_cny_g']);
-        tradeLogFullRef.value?.updatePrice(p['xau_cny_g']);
       }
     }
     if (msg['type'] === 'NEWS') {

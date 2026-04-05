@@ -39,6 +39,10 @@ export const api = {
   closePosition: (id: number, close_price_cny_g: number, close_fee?: number) =>
     http.post(`/api/positions/${id}/close`, { close_price_cny_g, close_fee }).then(r => r.data),
   getClosedPositions: () => http.get('/api/positions/closed').then(r => r.data),
+  updatePosition: (id: number, fields: Record<string, unknown>) =>
+    http.put(`/api/positions/${id}`, fields).then(r => r.data),
+  deletePosition: (id: number) =>
+    http.delete(`/api/positions/${id}`).then(r => r.data),
   getTradeStats: () => http.get('/api/positions/stats').then(r => r.data),
   // AI 问答
   chatWithAI: (question: string, history?: Array<{ role: string; content: string }>) =>

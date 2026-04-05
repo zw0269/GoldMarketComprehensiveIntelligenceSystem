@@ -399,6 +399,47 @@ export function savePositionReview(id: number, review: string): void {
   ).run(review, id);
 }
 
+/** 删除持仓记录（开仓或已平仓均可删除） */
+export function deletePosition(id: number): void {
+  getDB().prepare('DELETE FROM open_positions WHERE id = ?').run(id);
+}
+
+/** 修改持仓字段（支持开仓和历史记录的任意可编辑字段） */
+export function updatePosition(
+  id: number,
+  fields: {
+    buy_price_cny_g?: number;
+    grams?: number;
+    buy_fee?: number;
+    note?: string;
+    stop_loss?: number | null;
+    target_profit?: number | null;
+    close_price_cny_g?: number;
+    close_fee?: number;
+    buy_ts?: number;
+    realized_pnl?: number;
+  }
+): void {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+
+  if (fields.buy_price_cny_g  != null) { sets.push('buy_price_cny_g = ?');  vals.push(fields.buy_price_cny_g); }
+  if (fields.grams             != null) { sets.push('grams = ?');             vals.push(fields.grams); }
+  if (fields.buy_fee           != null) { sets.push('buy_fee = ?');           vals.push(fields.buy_fee); }
+  if (fields.note              != null) { sets.push('note = ?');              vals.push(fields.note); }
+  if ('stop_loss'     in fields)        { sets.push('stop_loss = ?');         vals.push(fields.stop_loss ?? null); }
+  if ('target_profit' in fields)        { sets.push('target_profit = ?');     vals.push(fields.target_profit ?? null); }
+  if (fields.close_price_cny_g != null) { sets.push('close_price_cny_g = ?'); vals.push(fields.close_price_cny_g); }
+  if (fields.close_fee         != null) { sets.push('close_fee = ?');         vals.push(fields.close_fee); }
+  if (fields.buy_ts            != null) { sets.push('buy_ts = ?');            vals.push(fields.buy_ts); }
+  if (fields.realized_pnl      != null) { sets.push('realized_pnl = ?');      vals.push(fields.realized_pnl); }
+
+  if (sets.length === 0) return;
+  vals.push(id);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (getDB().prepare(`UPDATE open_positions SET ${sets.join(', ')} WHERE id = ?`) as any).run(...vals);
+}
+
 /** 聚合统计：胜率、平均盈亏比 */
 export function getTradeStats(): Record<string, unknown> {
   const rows = getDB().prepare(

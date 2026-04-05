@@ -318,6 +318,34 @@ app.get('/api/positions/stats', (_req, res) => {
   res.json(getTradeStats());
 });
 
+/** 修改持仓（开仓或历史记录均可，字段按需传） */
+app.put('/api/positions/:id', (req, res) => {
+  const id = parseInt(req.params['id'] ?? '0', 10);
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { updatePosition } = require('../storage/dao');
+    updatePosition(id, req.body);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error('[api] update position failed', { err });
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+/** 删除持仓（开仓或历史记录均可删除） */
+app.delete('/api/positions/:id', (req, res) => {
+  const id = parseInt(req.params['id'] ?? '0', 10);
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    const { deletePosition } = require('../storage/dao');
+    deletePosition(id);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error('[api] delete position failed', { err });
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
 // ── 交易信号 API (A-011) ─────────────────────────────────────
 app.get('/api/signals/latest', async (_req, res) => {
   try {

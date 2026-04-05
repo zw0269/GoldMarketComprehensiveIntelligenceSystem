@@ -2,7 +2,7 @@
 
 > 项目：黄金市场全景情报系统（积存金短线交易辅助）
 > 技术栈：Node.js + TypeScript + SQLite + Vue 3 + ECharts + Claude API
-> 最后更新：2026-04-05（会话9）
+> 最后更新：2026-04-05（会话11）
 
 ---
 
@@ -296,6 +296,65 @@ CREATE TABLE ai_interaction_log (
 
 ---
 
+### 会话 10 — 2026-04-05：历史行情数据源替换（国内可访问）
+
+**背景：** Yahoo Finance 在中国大陆被墙，`/api/price/historical` 始终 503，本地 `prices_daily` 也因未及时写入而为空，历史 K 线图完全无法使用。
+
+**解决方案：** 替换 `historical.collector.ts`，改用两个国内稳定可访问的免费数据源：
+
+| 数据源 | 接口 | 品种 | 价格单位 |
+|--------|------|------|---------|
+| **东方财富（主）** | `push2his.eastmoney.com/api/qt/stock/kline/get` | 上期所沪金主力 AU0 | CNY/g |
+| **新浪财经（备）** | `money.finance.sina.com.cn/.../CN_MarketData.getKLineData` | SGE Au9999 现货 | CNY/g |
+
+**涉及文件：**
+
+| 文件 | 操作 |
+|------|------|
+| `src/collectors/price/historical.collector.ts` | **重写**：移除 Yahoo Finance，接入东方财富K线接口（主）+ 新浪财经（备），主源失败自动切换备源 |
+| `web/src/components/HistoricalChart.vue` | Y轴标签从 `$` 改为 `¥`（价格单位由 USD/oz 改为 CNY/g） |
+
+**东方财富 K 线接口参数：**
+```
+secid=113.AU0  (上期所沪金主力)
+klt=101  (日K) / 102 (周K)
+beg=YYYYMMDD  end=20991231
+```
+klines 字段顺序：`日期,开,收,高,低,量,额,振幅,涨幅,涨额,换手`
+
+---
+
+### 会话 11 — 2026-04-05：持仓删改操作 + 实时盈亏 Bug 修复
+
+**背景：** 用户需要对历史持仓进行编辑和删除操作；同时发现实时盈亏显示异常（初始值为大幅负数）。
+
+**Bug 根因（实时盈亏）：**
+```javascript
+// 旧代码：currentPrice=0 时，0 ?? x = 0（?? 只排除 null/undefined），
+// 导致 pnl = (0 - cost) × grams = 巨额负数
+const price = props.currentPrice ?? pos.buy_price_cny_g;
+
+// 修复：用 computed activePrice + || 运算符
+const activePrice = computed(() => props.currentPrice ?? 0);
+const price = activePrice.value || pos.buy_price_cny_g;  // 0 也触发回退
+```
+
+**涉及文件：**
+
+| 文件 | 操作 |
+|------|------|
+| `src/storage/dao.ts` | 新增 `deletePosition(id)` — 删除任意持仓记录；新增 `updatePosition(id, fields)` — 动态更新指定字段（开仓/平仓均支持）|
+| `src/api/server.ts` | 新增 `PUT /api/positions/:id`（修改）和 `DELETE /api/positions/:id`（删除）两个端点 |
+| `web/src/api/index.ts` | 新增 `updatePosition(id, fields)` 和 `deletePosition(id)` 前端接口 |
+| `web/src/components/TradeLog.vue` | **重构**：修复 P&L Bug；每笔开仓卡片增加 ✏️编辑（内联展开表单）和 🗑️删除按钮；新增"历史持仓"区块，按需加载已平仓记录并支持逐条编辑/删除（平仓价修改后自动重算 `realized_pnl`）|
+| `web/src/App.vue` | 移除冗余的 `tradeLogRef.updatePrice()` 调用（`cnyPrice` 已通过 prop 响应式传递，`computed activePrice` 替代手动更新）|
+
+**新增持仓编辑字段：**
+- 开仓持仓：买入价、克数、手续费、止损价、目标价、备注
+- 历史持仓：买入价、平仓价、克数、买入/平仓手续费、备注（保存时重算 `realized_pnl`）
+
+---
+
 ### 会话 8 — 2026-04-05：接入 Truth Social（Trump 原发帖）信息源
 
 **用户需求：** 监听 Trump 在 Truth Social 的发帖，纳入黄金市场情报采集范围。
@@ -351,6 +410,8 @@ CREATE TABLE ai_interaction_log (
 | 2026-04-05 | 历史行情降级后仍无数据 | `prices_daily` 表设计了但从未写入 | `dao.ts` 新增 `upsertDailyOHLCV()`，调度器每日 00:05 聚合日线 |
 | 2026-04-05 | MetalpriceAPI troy oz 换算误差 3.4% | `metalprice.collector.ts` 用 32.1507（troy oz/kg）而非 31.1035（g/oz） | 修正为 31.1035 |
 | 2026-04-05 | AI 重试3次总等待可达 30 分钟 | `withRetry maxAttempts=3` 对所有调用类型生效 | idea/chat 类型改为 `maxAttempts=1` |
+| 2026-04-05 | 历史行情 K 线图无数据（降级后仍空白） | Yahoo Finance 被墙，本地 `prices_daily` 也未写入 | 替换为东方财富（主）+ 新浪财经（备）两个国内数据源 |
+| 2026-04-05 | 持仓实时盈亏初始显示巨额负数 | `currentPrice=0` 时 `0 ?? cost = 0`，`??` 不触发回退，P&L = `(0-cost)×grams` | 改用 `computed activePrice` + `\|\|` 运算符，价格未到位显示"等待价格…" |
 
 ---
 

@@ -159,8 +159,13 @@ function buildFullContext(
     const age = Math.round((Date.now() - sigTs) / 60000);
     lines.push('', '## 系统交易信号');
     lines.push(`信号: ${signal['signal']} | 评分: ${signal['score']} | 置信度: ${signal['confidence']}%（${age}分钟前生成）`);
-    const reasons = signal['reasons'] as string[] | null;
-    if (reasons?.length) {
+    const rawReasons = signal['reasons'];
+    const reasons: string[] = Array.isArray(rawReasons)
+      ? rawReasons as string[]
+      : typeof rawReasons === 'string'
+        ? (() => { try { return JSON.parse(rawReasons) as string[]; } catch { return []; } })()
+        : [];
+    if (reasons.length) {
       lines.push('信号理由:');
       reasons.slice(0, 3).forEach(r => lines.push(`  - ${r}`));
     }

@@ -67,7 +67,7 @@ async function callCustomEndpoint(
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      timeout: 60000, // 本地模型可能较慢
+      timeout: 600000, // AI 分析最长 10 分钟
     }
   );
 

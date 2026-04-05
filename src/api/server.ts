@@ -159,7 +159,30 @@ app.get('/api/price/historical', async (req, res) => {
     const data = await fetchHistoricalGold(range as '1mo' | '3mo' | '1y' | '5y' | 'max');
     res.json({ range, count: data.length, data });
   } catch (err) {
-    logger.error('[api] historical fetch failed', { err });
+    logger.warn('[api] historical fetch failed, falling back to local DB', { err });
+    // 降级：Yahoo Finance 被墙时使用本地数据库历史数据
+    try {
+      const { getDailyOHLCV } = require('../storage/dao');
+      const daysMap: Record<string, number> = { '1mo': 30, '3mo': 90, '1y': 365, '5y': 1825, 'max': 9999 };
+      const days = daysMap[range] ?? 365;
+      const rows = getDailyOHLCV(days) as Array<{
+        date: string; open: number; high: number; low: number; close: number; volume: number;
+      }>;
+      if (rows.length > 0) {
+        const data = rows.reverse().map(r => ({
+          timestamp: new Date(r.date).getTime(),
+          open: r.open,
+          high: r.high,
+          low: r.low,
+          close: r.close,
+          volume: r.volume ?? 0,
+          timeframe: range === '1mo' || range === '3mo' ? '1d' : '1w',
+        }));
+        return res.json({ range, count: data.length, data, source: 'local' });
+      }
+    } catch (fallbackErr) {
+      logger.error('[api] local DB fallback also failed', { fallbackErr });
+    }
     res.status(503).json({ error: 'Failed to fetch historical data' });
   }
 });

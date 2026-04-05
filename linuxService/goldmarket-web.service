@@ -1,0 +1,36 @@
+[Unit]
+Description=GoldMarket Comprehensive Intelligence System - Web Frontend
+Documentation=https://github.com/zw0269/GoldMarketComprehensiveIntelligenceSystem
+# 必须等后端服务启动后再启动前端
+After=network-online.target goldmarket.service
+Wants=network-online.target
+# 若后端停止，前端也随之停止
+BindsTo=goldmarket.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/var/www/GoldMarketComprehensiveIntelligenceSystem/web
+
+Environment=NODE_ENV=production
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.nvm/versions/node/v24.14.1/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# vite preview 服务已构建的静态文件（dist/ 目录）
+# 启动前请先执行: cd web && npm run build
+ExecStart=/home/ubuntu/.nvm/versions/node/v24.14.1/bin/npm run preview
+
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=5
+
+LimitNOFILE=65536
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=goldmarket-web
+
+[Install]
+WantedBy=multi-user.target

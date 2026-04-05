@@ -16,11 +16,12 @@ import { computed } from 'vue';
 
 interface FundRow { name: string; tonnes: number; change: number | null; }
 
-const props = defineProps<{ data: Record<string, unknown[]> }>();
+const props = defineProps<{ data: Record<string, unknown> }>();
 
 const funds = computed<FundRow[]>(() => {
   return Object.entries(props.data).map(([name, rows]) => {
-    const latest = (rows[0] ?? {}) as Record<string, number>;
+    const arr = (rows as unknown[]);
+    const latest = (arr[0] ?? {}) as Record<string, number>;
     return { name, tonnes: latest['tonnes'] ?? 0, change: latest['change_val'] ?? null };
   }).filter(f => f.tonnes > 0);
 });

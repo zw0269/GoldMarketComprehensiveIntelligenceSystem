@@ -185,7 +185,6 @@ const closeForm = reactive<Record<number, number>>({});
 const closeFee  = reactive<Record<number, number>>({});
 const closing   = ref<number | null>(null);
 
-const banks = ['工商银行', '招商银行', '建设银行', '农业银行', '中国银行', '平安银行', '其他'];
 
 const moForm = reactive({
   buy_price_cny_g: 0, grams: 0, stop_loss: 0,
@@ -225,7 +224,6 @@ const formatDuration = (ts: number) => {
   if (h < 24) return `${h}小时`;
   return `${Math.floor(h / 24)}天`;
 };
-const formatDate = (ts: number) => new Date(ts).toLocaleDateString('zh-CN');
 
 async function loadAll() {
   const [p, s] = await Promise.allSettled([api.getPositions(), api.getTradeStats()]);

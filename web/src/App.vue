@@ -247,7 +247,7 @@ onMounted(async () => {
       const d = msg['data'] as { id: number; review: Record<string, unknown> };
       reviewRef.value?.onReviewReady(
         d.id,
-        d.review as Parameters<NonNullable<typeof reviewRef.value>['onReviewReady']>[1]
+        d.review as unknown as Parameters<NonNullable<typeof reviewRef.value>['onReviewReady']>[1]
       );
       reviewRef.value?.reload();
     }

@@ -26,26 +26,27 @@ import { computed } from 'vue';
 
 interface InvRow { name: string; total: number; change: number; unit: string; registered?: number; eligible?: number; }
 
-const props = defineProps<{ data: Record<string, unknown[]> }>();
+const props = defineProps<{ data: Record<string, unknown> }>();
 
 const exchanges = computed<InvRow[]>(() => {
   const result: InvRow[] = [];
   for (const [ex, rows] of Object.entries(props.data)) {
-    const latest = rows[0] as Record<string, number> | undefined;
+    const arr = rows as unknown[];
+    const latest = arr[0] as Record<string, unknown> | undefined;
     if (!latest) continue;
     result.push({
       name: ex,
-      total: latest['total'] ?? 0,
-      change: latest['change_val'] ?? 0,
-      unit: (latest['unit'] as string) ?? 'oz',
-      registered: latest['registered'],
-      eligible: latest['eligible'],
+      total: (latest['total'] as number) ?? 0,
+      change: (latest['change_val'] as number) ?? 0,
+      unit: (latest['unit'] as string | undefined) ?? 'oz',
+      registered: latest['registered'] as number | undefined,
+      eligible: latest['eligible'] as number | undefined,
     });
   }
   return result;
 });
 
-const formatNum = (n: number) => n ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—';
+const formatNum = (n: number | undefined) => n ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—';
 const regPct = (ex: InvRow) => ex.total ? ((ex.registered ?? 0) / ex.total * 100).toFixed(1) : 0;
 const eliPct = (ex: InvRow) => ex.total ? ((ex.eligible ?? 0) / ex.total * 100).toFixed(1) : 0;
 </script>

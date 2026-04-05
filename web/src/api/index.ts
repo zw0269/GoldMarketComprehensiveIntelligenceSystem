@@ -23,7 +23,7 @@ export const api = {
   getAIBackend: () => http.get('/api/ai/backend').then(r => r.data),
   getHistorical: (range = '1y') => http.get('/api/price/historical', { params: { range } }).then(r => r.data),
   getIdeas: () => http.get('/api/ideas').then(r => r.data),
-  submitIdea: (content: string) => http.post('/api/ideas', { content }).then(r => r.data),
+  submitIdea: (content: string) => http.post('/api/ideas', { content }, { timeout: 600000 }).then(r => r.data),
   // 交易信号
   getLatestSignal: () => http.get('/api/signals/latest').then(r => r.data),
   getSignalHistory: () => http.get('/api/signals/history').then(r => r.data),

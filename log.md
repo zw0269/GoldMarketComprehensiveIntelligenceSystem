@@ -2,7 +2,7 @@
 
 > 项目：黄金市场全景情报系统（积存金短线交易辅助）
 > 技术栈：Node.js + TypeScript + SQLite + Vue 3 + ECharts + Claude API
-> 最后更新：2026-04-05（会话11）
+> 最后更新：2026-04-05（会话12）
 
 ---
 
@@ -352,6 +352,25 @@ const price = activePrice.value || pos.buy_price_cny_g;  // 0 也触发回退
 **新增持仓编辑字段：**
 - 开仓持仓：买入价、克数、手续费、止损价、目标价、备注
 - 历史持仓：买入价、平仓价、克数、买入/平仓手续费、备注（保存时重算 `realized_pnl`）
+
+---
+
+### 会话 12 — 2026-04-05：Bug 修复（DELETE CORS + 历史行情代理 503）
+
+**问题 1：删除持仓 Network Error**
+- 现象：`DELETE /api/positions/:id` 返回 Network Error
+- 根因：CORS 中间件 `Access-Control-Allow-Methods` 只列了 `GET,POST,OPTIONS`，缺少 `DELETE` 和 `PUT`，导致预检请求被浏览器拒绝
+- 修复：`src/api/server.ts` — 将 Allow-Methods 改为 `GET,POST,PUT,DELETE,OPTIONS`
+
+**问题 2：历史行情 503 — Failed to fetch historical data**
+- 现象：`GET /api/price/historical?range=1y` 返回 503，错误信息含 `127.0.0.1:7897`
+- 根因：本地代理软件（端口 7897，Clash/V2Ray 等）截获了 axios 请求并返回 503，导致东方财富和新浪财经两个数据源均失败，本地 DB 回退也无数据
+- 修复：`src/collectors/price/historical.collector.ts` — 两个 axios.get 调用均加 `proxy: false`，绕过系统代理直连
+
+| 文件 | 操作 |
+|------|------|
+| `src/api/server.ts` | CORS `Allow-Methods` 补全 `PUT,DELETE` |
+| `src/collectors/price/historical.collector.ts` | `fetchFromEastmoney` + `fetchFromSina` 两处 axios 加 `proxy: false` |
 
 ---
 

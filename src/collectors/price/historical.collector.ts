@@ -69,6 +69,7 @@ async function fetchFromEastmoney(range: Range): Promise<IOHLCV[]> {
       'Referer':    'https://finance.eastmoney.com/',
     },
     timeout: 15000,
+    proxy: false,               // 跳过系统代理（避免本地代理 127.0.0.1:7897 干扰）
   });
 
   const klines: string[] | undefined =
@@ -140,6 +141,7 @@ async function fetchFromSina(range: Range): Promise<IOHLCV[]> {
       'Referer':    'https://finance.sina.com.cn/',
     },
     timeout: 15000,
+    proxy: false,               // 跳过系统代理（避免本地代理 127.0.0.1:7897 干扰）
   });
 
   const raw = res.data as Array<Record<string, string>>;

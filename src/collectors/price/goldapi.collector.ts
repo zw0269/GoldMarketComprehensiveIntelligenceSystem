@@ -42,6 +42,7 @@ export async function fetchGoldAPIData(): Promise<IPriceData | null> {
       } satisfies IPriceData;
     },
     'GoldAPI.io',
-    { maxAttempts: 3, baseDelayMs: 2000 }
+    // 403 是认证失败，重试无意义；仅尝试1次，快速失败
+    { maxAttempts: 1, baseDelayMs: 1000 }
   );
 }

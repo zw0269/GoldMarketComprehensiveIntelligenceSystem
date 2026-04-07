@@ -1,8 +1,8 @@
 <template>
   <div class="trade-log">
 
-    <!-- ── 汇总统计栏 ── -->
-    <div class="summary-bar" v-if="stats">
+    <!-- ── 汇总统计栏（compact 模式隐藏） ── -->
+    <div class="summary-bar" v-if="stats && !compact">
       <div class="sb-item">
         <span class="sb-label">历史胜率</span>
         <span class="sb-val" :class="stats.winRate >= 50 ? 'green' : 'red'">
@@ -35,13 +35,21 @@
       </div>
     </div>
 
+    <!-- ── compact 模式：总盈亏一行摘要 ── -->
+    <div class="compact-summary" v-if="compact && activePrice > 0 && positions.length">
+      <span class="cs-label">{{ positions.length }}笔持仓</span>
+      <span class="cs-pnl" :class="totalLivePnl >= 0 ? 'green' : 'red'">
+        总浮盈 {{ totalLivePnl >= 0 ? '+' : '' }}¥{{ totalLivePnl.toFixed(2) }}
+      </span>
+    </div>
+
     <!-- ── 当前持仓（逐笔实时） ── -->
     <div class="section-title">
       当前持仓
       <span class="badge" v-if="positions.length">{{ positions.length }}</span>
     </div>
 
-    <div class="positions-list" v-if="positions.length">
+    <div class="positions-list" :class="{ 'positions-compact': compact }" v-if="positions.length">
       <div class="position-card" v-for="pos in positions" :key="pos.id as number"
         :class="activePrice > 0 ? (livePnl(pos) >= 0 ? 'pos-profit' : 'pos-loss') : 'pos-neutral'">
 
@@ -103,8 +111,8 @@
           </div>
         </div>
 
-        <!-- 止损/目标价位线 -->
-        <div class="pos-levels" v-if="pos.stop_loss || pos.target_profit">
+        <!-- 止损/目标价位线（compact 模式隐藏） -->
+        <div class="pos-levels" v-if="!compact && (pos.stop_loss || pos.target_profit)">
           <div class="pl-item stop" v-if="pos.stop_loss">
             🛑 止损 <b>¥{{ (pos.stop_loss as number).toFixed(2) }}</b>
             <span class="pl-gap">
@@ -119,8 +127,8 @@
           </div>
         </div>
 
-        <!-- 进度条 -->
-        <div class="progress-bar" v-if="pos.stop_loss && pos.target_profit && activePrice > 0">
+        <!-- 进度条（compact 模式隐藏） -->
+        <div class="progress-bar" v-if="!compact && pos.stop_loss && pos.target_profit && activePrice > 0">
           <div class="pb-track">
             <div class="pb-fill" :style="{ width: progressPct(pos) + '%' }"></div>
           </div>
@@ -139,8 +147,8 @@
           <span class="pm-item">手续费 ¥{{ (pos.buy_fee as number || 0).toFixed(2) }}</span>
         </div>
 
-        <!-- 开仓时信号 -->
-        <div class="pos-signal" v-if="pos.entry_signal">
+        <!-- 开仓时信号（compact 模式隐藏） -->
+        <div class="pos-signal" v-if="!compact && pos.entry_signal">
           开仓信号：
           <span :class="sigCls(pos.entry_signal.signal)">{{ LABELS[pos.entry_signal.signal] ?? pos.entry_signal.signal }}</span>
           置信度 {{ pos.entry_signal.confidence }}%
@@ -148,40 +156,54 @@
 
         <!-- 平仓操作 -->
         <div class="pos-close-row">
-          <input
-            v-model.number="closeForm[pos.id as number]"
-            type="number" step="0.01"
-            :placeholder="'平仓价 ¥/g (当前≈' + (activePrice > 0 ? activePrice.toFixed(2) : '?') + ')'"
-            class="close-input"
-          />
-          <input
-            v-model.number="closeFee[pos.id as number]"
-            type="number" step="0.01"
-            placeholder="手续费 ¥"
-            class="close-fee-input"
-          />
-          <button
-            class="close-btn"
-            @click="doClose(pos.id as number)"
-            :disabled="!closeForm[pos.id as number] || closing === (pos.id as number)"
-          >
-            {{ closing === (pos.id as number) ? '平仓中...' : '平仓' }}
-          </button>
-          <button
-            class="close-btn-quick"
-            @click="quickClose(pos.id as number)"
-            :title="'按当前价格 ¥' + activePrice.toFixed(2) + '/g 平仓'"
-            :disabled="activePrice <= 0 || closing === (pos.id as number)"
-          >
-            按当前价平仓
-          </button>
+          <!-- compact：只显示当前价快速平仓 -->
+          <template v-if="compact">
+            <button
+              class="close-btn-quick"
+              @click="quickClose(pos.id as number)"
+              :title="'按当前价格 ¥' + activePrice.toFixed(2) + '/g 平仓'"
+              :disabled="activePrice <= 0 || closing === (pos.id as number)"
+            >
+              {{ closing === (pos.id as number) ? '平仓中...' : '按当前价平仓' }}
+            </button>
+          </template>
+          <!-- 完整模式 -->
+          <template v-else>
+            <input
+              v-model.number="closeForm[pos.id as number]"
+              type="number" step="0.01"
+              :placeholder="'平仓价 ¥/g (当前≈' + (activePrice > 0 ? activePrice.toFixed(2) : '?') + ')'"
+              class="close-input"
+            />
+            <input
+              v-model.number="closeFee[pos.id as number]"
+              type="number" step="0.01"
+              placeholder="手续费 ¥"
+              class="close-fee-input"
+            />
+            <button
+              class="close-btn"
+              @click="doClose(pos.id as number)"
+              :disabled="!closeForm[pos.id as number] || closing === (pos.id as number)"
+            >
+              {{ closing === (pos.id as number) ? '平仓中...' : '平仓' }}
+            </button>
+            <button
+              class="close-btn-quick"
+              @click="quickClose(pos.id as number)"
+              :title="'按当前价格 ¥' + activePrice.toFixed(2) + '/g 平仓'"
+              :disabled="activePrice <= 0 || closing === (pos.id as number)"
+            >
+              按当前价平仓
+            </button>
+          </template>
         </div>
       </div>
     </div>
     <div class="empty-pos" v-else>暂无持仓 · 在信号面板按信号开仓，或手动添加</div>
 
-    <!-- ── 快速买入 ── -->
-    <div class="quick-manual">
+    <!-- ── 快速买入（compact 模式隐藏） ── -->
+    <div class="quick-manual" v-if="!compact">
       <div class="qm-title">+ 记录买入</div>
       <div class="qm-row">
         <div class="qm-field">
@@ -202,14 +224,14 @@
       <p class="qm-hint">止损/目标价自动从最新信号填入 · 如需精确设置请在信号面板开仓</p>
     </div>
 
-    <!-- ── 历史持仓（已平仓，可删改） ── -->
-    <div class="section-title section-sep">
+    <!-- ── 历史持仓（compact 模式隐藏） ── -->
+    <div class="section-title section-sep" v-if="!compact">
       历史持仓
       <span class="badge-gray" v-if="closedPositions.length">{{ closedPositions.length }}</span>
       <button class="load-history-btn" v-if="!historyLoaded" @click="loadHistory">加载历史记录</button>
     </div>
 
-    <div v-if="historyLoaded">
+    <div v-if="historyLoaded && !compact">
       <div v-if="closedPositions.length === 0" class="empty-pos">暂无历史持仓记录</div>
       <div class="closed-list" v-else>
         <div class="closed-card"
@@ -304,10 +326,15 @@ interface Stats {
   avgPnl: number; avgWin: number; avgLoss: number; profitFactor: number | null;
 }
 
-const props = defineProps<{ currentPrice?: number }>();
+const props = defineProps<{
+  currentPrice?: number;
+  /** 精简模式：只显示持仓卡片+快捷平仓，隐藏统计栏/买入表单/历史 */
+  compact?: boolean;
+}>();
 
 // 有效当前价（避免 0 导致错误盈亏）
 const activePrice = computed(() => props.currentPrice ?? 0);
+const compact = computed(() => props.compact ?? false);
 
 const positions       = ref<Position[]>([]);
 const closedPositions = ref<ClosedPosition[]>([]);
@@ -347,6 +374,11 @@ const livePnl = (pos: Position) => {
   const price = activePrice.value || pos.buy_price_cny_g;
   return (price - pos.buy_price_cny_g) * pos.grams - (pos.buy_fee ?? 0);
 };
+
+// ── 总浮动盈亏（compact 摘要行用）────────────────────────────
+const totalLivePnl = computed(() =>
+  positions.value.reduce((s, pos) => s + livePnl(pos), 0)
+);
 const livePnlPct = (pos: Position) => {
   const price = activePrice.value || pos.buy_price_cny_g;
   return ((price - pos.buy_price_cny_g) / pos.buy_price_cny_g) * 100;
@@ -557,8 +589,25 @@ onMounted(loadAll);
 }
 .load-history-btn:hover { background: rgba(212,175,55,0.08); }
 
+/* compact 摘要行 */
+.compact-summary {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 10px; background: rgba(0,0,0,0.2); border-radius: 6px;
+  font-size: 12px;
+}
+.cs-label { color: #888; }
+.cs-pnl   { font-weight: 700; font-size: 14px; }
+
 /* 持仓卡片 */
-.positions-list { display: flex; flex-direction: column; gap: 8px; }
+.positions-list {
+  display: flex; flex-direction: column; gap: 8px;
+  /* 完整模式：超过4张卡时出滚动条 */
+  max-height: 600px; overflow-y: auto;
+}
+/* compact 模式：更严格的高度限制 */
+.positions-list.positions-compact {
+  max-height: 420px;
+}
 .position-card {
   border: 1px solid #2a2a4a; border-radius: 8px; padding: 12px;
   display: flex; flex-direction: column; gap: 8px;

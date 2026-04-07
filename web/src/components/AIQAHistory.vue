@@ -39,8 +39,8 @@
 
           <!-- idea 类型展示方向/评分/操作 -->
           <template v-if="r.type === 'idea' && r.meta">
-            <span class="idea-dir" :class="r.meta.direction">
-              {{ DIR_ICONS[r.meta.direction] ?? '' }} {{ r.meta.direction }}
+            <span class="idea-dir" :class="r.meta.direction ?? ''">
+              {{ r.meta.direction ? (DIR_ICONS[r.meta.direction] ?? '') : '' }} {{ r.meta.direction ?? '' }}
             </span>
             <span class="idea-score">{{ r.meta.score }}/10</span>
             <span class="idea-action">{{ r.meta.action }}</span>
@@ -291,8 +291,7 @@ onMounted(() => load(true));
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 560px;
-  overflow-y: auto;
+  /* 不限制整体高度，让 .qa-history 本身滚动（由外部面板控制） */
   padding-right: 2px;
 }
 
@@ -377,7 +376,13 @@ onMounted(() => load(true));
   word-break: break-word;
 }
 .question-text { color: #bbb; background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 4px; }
-.answer-text   { color: #e0e0e0; }
+.answer-text {
+  color: #e0e0e0;
+  /* 答案独立滚动区，避免撑开整个列表 */
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
 
 /* ── idea 元信息行 ── */
 .idea-meta-row {

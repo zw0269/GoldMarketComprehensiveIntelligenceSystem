@@ -396,7 +396,11 @@ body { background: var(--dark); color: var(--text); font-family: 'JetBrains Mono
 .ai-chat-main .panel > h2 { flex-shrink: 0; }
 /* AIChat 组件撑满面板剩余空间 */
 .ai-chat-main .panel > * { flex: 1; min-height: 0; }
-.ai-history-panel { min-height: 200px; }
+.ai-history-panel {
+  /* 与主聊天面板同高，内容超出时自身滚动 */
+  height: 700px;
+  overflow-y: auto;
+}
 
 /* 响应式 */
 @media (max-width: 900px) {

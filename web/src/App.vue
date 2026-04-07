@@ -83,7 +83,7 @@
         <div class="pane-grid market-grid">
           <section class="panel span2">
             <h2>📈 价格走势</h2>
-            <PriceChart :data="priceHistory" />
+            <PriceChart ref="priceChartRef" :data="priceHistory" />
           </section>
           <section class="panel">
             <h2>🌐 宏观面板</h2>
@@ -95,7 +95,7 @@
           </section>
           <section class="panel span2">
             <h2>📊 黄金历史行情</h2>
-            <HistoricalChart />
+            <HistoricalChart ref="historicalChartRef" />
           </section>
         </div>
       </div>
@@ -137,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { api, createWSConnection } from './api';
 
 import PriceChart     from './components/PriceChart.vue';
@@ -176,9 +176,11 @@ const wsConnected    = ref(false);
 const aiBackend      = ref<{ type: string; model: string } | null>(null);
 const cnyPrice       = ref(0);
 
-const tradeLogRef     = ref<InstanceType<typeof TradeLog> | null>(null);
-const tradeLogFullRef = ref<InstanceType<typeof TradeLog> | null>(null);
-const reviewRef       = ref<InstanceType<typeof ReviewPanel> | null>(null);
+const tradeLogRef       = ref<InstanceType<typeof TradeLog> | null>(null);
+const tradeLogFullRef   = ref<InstanceType<typeof TradeLog> | null>(null);
+const reviewRef         = ref<InstanceType<typeof ReviewPanel> | null>(null);
+const priceChartRef     = ref<InstanceType<typeof PriceChart> | null>(null);
+const historicalChartRef = ref<InstanceType<typeof HistoricalChart> | null>(null);
 
 // ── 价格变化计算 ──
 const priceChangeStr = computed(() => {
@@ -198,6 +200,16 @@ function onPositionOpened() {
   activeTab.value = 'position';
 }
 
+// ── 切换到市场行情 tab 时，通知 ECharts 重算尺寸 ──────────────
+watch(activeTab, (tab) => {
+  if (tab === 'market') {
+    setTimeout(() => {
+      priceChartRef.value?.resize();
+      historicalChartRef.value?.resize();
+    }, 50);
+  }
+});
+
 let ws: { close: () => void } | null = null;
 
 onMounted(async () => {
@@ -205,7 +217,7 @@ onMounted(async () => {
 
   const [price, history, macro, inventory, etf, news] = await Promise.allSettled([
     api.getLatestPrice(),
-    api.getPriceHistory('1h', 7),
+    api.getIntraday('5m', '5d'),   // Yahoo Finance 5分钟线，5天
     api.getMacroDashboard(),
     api.getInventoryCompare(),
     api.getETFHoldings(),
@@ -227,11 +239,24 @@ onMounted(async () => {
     wsConnected.value = true;
 
     if (msg['type'] === 'PRICE') {
-      const p = msg['data'] as Record<string, number>;
+      // WS 广播的是 aggregator 的 camelCase 格式（xauUsd, xauCny, timestamp...）
+      // 需转换为 REST API 的 snake_case 格式（xau_usd, xau_cny_g, ts...）保持统一
+      const raw = msg['data'] as Record<string, unknown>;
+      const p: Record<string, number> = {
+        ts:          raw['timestamp'] as number,
+        xau_usd:     raw['xauUsd']   as number,
+        xau_cny_g:   raw['xauCny']   as number,
+        usd_cny:     raw['usdCny']   as number,
+        sge_premium: (raw['sgePremiumUsd'] as number) ?? 0,
+      };
+
       prevPrice.value   = latestPrice.value?.['xau_cny_g'] ?? null;
       latestPrice.value = p;
-      if (p['xau_cny_g']) {
-        cnyPrice.value = p['xau_cny_g'];
+      if (p['xau_cny_g']) cnyPrice.value = p['xau_cny_g'];
+
+      // 实时追加到价格走势图（只保留最近 2880 条 ≈ 2天分钟级数据）
+      if (p['ts'] && p['xau_usd']) {
+        priceHistory.value = [...priceHistory.value, p].slice(-2880);
       }
     }
     if (msg['type'] === 'NEWS') {

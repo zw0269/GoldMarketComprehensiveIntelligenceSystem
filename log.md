@@ -2,7 +2,7 @@
 
 > 项目：黄金市场全景情报系统（积存金短线交易辅助）
 > 技术栈：Node.js + TypeScript + SQLite + Vue 3 + ECharts + Claude API
-> 最后更新：2026-04-05（会话12）
+> 最后更新：2026-04-07（会话13）
 
 ---
 
@@ -273,6 +273,44 @@ CREATE TABLE ai_interaction_log (
 - **邮件**：HTML模板，含彩色变动百分比大字体、价格前后对比表、风险提示文字
 
 **运营说明：** 此监控与每1分钟的价格采集共用数据库记录，无额外 API 调用，资源消耗极低。
+
+---
+
+### 会话 13 — 2026-04-07：价格走势分钟级数据 + 历史行情图表修复
+
+**用户需求：**
+1. 价格走势要有大量数据点（不能只有2条）
+2. 黄金历史行情数据加载失败修复
+3. 价格走势按分钟级查询
+
+**根因分析：**
+- 价格走势（PriceChart）数据来自本地 SQLite `prices` 表，系统刚启动时只有极少记录
+- 历史行情（HistoricalChart）使用东方财富/腾讯/新浪，均已失败（上一个修复改回国内源）；Yahoo Finance 实测可访问未被使用
+- 历史图表在 `v-show` Tab 切换时 ECharts 容器宽度=0，渲染空白
+
+**解决方案：**
+
+| 操作 | 涉及文件 | 说明 |
+|------|---------|------|
+| 新增 `/api/price/intraday` 接口 | `src/api/server.ts` | 从 Yahoo Finance GC=F 获取 5 分钟 K 线（5天，约1300+数据点），降级回本地 DB |
+| 新增 `getIntraday()` | `web/src/api/index.ts` | 前端封装，timeout 15s |
+| 价格走势改用 intraday 数据 | `web/src/App.vue` | `getPriceHistory('1h',7)` → `getIntraday('5m','5d')` |
+| PriceChart 优化 | `web/src/components/PriceChart.vue` | 新增底部 dataZoom 滑块；X轴间隔适配1000+点；容器高度 320→360px；时间格式区分日内/多日 |
+| Yahoo Finance 加入历史数据源 | `src/collectors/price/historical.collector.ts` | 新增 `fetchFromYahoo()`，作为**首选源**（GC=F USD/oz，国内可访问），东方财富/腾讯/新浪降为备用 |
+| 历史图表完整重写 | `web/src/components/HistoricalChart.vue` | 修复 v-show Tab 切换渲染空白；加 `nextTick` 确保 DOM 就绪后渲染；`defineExpose({ resize })`；自动检测 USD/CNY 切换符号和标签；数据来源标签（Yahoo/东方财富/新浪/本地）；loading 旋转动画；错误详情展示；过渡动画 |
+| App.vue 补全 resize 调用 | `web/src/App.vue` | Tab 切换到市场行情时同时 resize PriceChart + HistoricalChart，解决容器宽度=0 问题 |
+
+**货币自动检测逻辑：**
+```javascript
+// Yahoo GC=F 返回 USD/oz（收盘价 2000~6000），国内源返回 CNY/g（<1500）
+const isUSD = computed(() => Math.max(...closes) > 1800);
+```
+
+**HistoricalChart 核心 Bug 修复：**
+1. `v-show` 隐藏时 ECharts 宽度=0 → `resize()` 前置 + `defineExpose` 供父组件调用
+2. `renderChart()` 在 DOM 更新前执行 → 加 `await nextTick()` 后再渲染
+3. overlay 遮罩定位错误 → 改用独立 `.chart-wrap` 容器，`position:relative` 与 `inset:0` 精确覆盖
+4. `watch(activeRange)` 只 resize 不重渲染 → 删除冗余 watch，改由 `switchRange→loadData→renderChart` 链路统一处理
 
 ---
 

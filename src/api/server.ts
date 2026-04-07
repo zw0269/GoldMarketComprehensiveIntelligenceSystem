@@ -148,19 +148,68 @@ app.get('/api/alerts/history', (_req, res) => {
   res.json(getAlertHistory(100));
 });
 
+// ── 分钟级实时走势 API（Yahoo Finance GC=F）─────────────────────
+app.get('/api/price/intraday', async (req, res) => {
+  const interval = (req.query['interval'] as string) || '5m';
+  const range    = (req.query['range']    as string) || '5d';
+  const validIntervals = ['1m', '2m', '5m', '15m', '30m', '60m'];
+  const validRanges    = ['1d', '5d', '1mo'];
+  if (!validIntervals.includes(interval)) return res.status(400).json({ error: 'Invalid interval' });
+  if (!validRanges.includes(range))       return res.status(400).json({ error: 'Invalid range' });
+
+  try {
+    const { default: axios } = await import('axios');
+    const r = await axios.get('https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF', {
+      params: { interval, range },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      timeout: 12000,
+    });
+
+    const chart  = (r.data as Record<string, unknown>)?.['chart'] as Record<string, unknown>;
+    const result = ((chart?.['result'] as unknown[]) ?? [])[0] as Record<string, unknown> | undefined;
+    if (!result) return res.status(503).json({ error: 'Yahoo Finance 无数据' });
+
+    const timestamps = result['timestamp'] as number[] | undefined;
+    const indicators = result['indicators'] as Record<string, unknown> | undefined;
+    const quote      = ((indicators?.['quote'] as unknown[]) ?? [])[0] as Record<string, number[]> | undefined;
+    const closes     = quote?.['close'];
+
+    if (!timestamps || !closes) return res.status(503).json({ error: 'Yahoo Finance 响应格式异常' });
+
+    const usdCny = 7.25;
+    const data = timestamps
+      .map((t, i) => ({
+        ts:       t * 1000,
+        xau_usd:  closes[i] ?? null,
+        xau_cny_g: closes[i] ? parseFloat(((closes[i] * usdCny) / 31.1035).toFixed(2)) : null,
+      }))
+      .filter(d => d.xau_usd != null && !isNaN(d.xau_usd) && d.xau_usd > 100);
+
+    res.json({ interval, range, count: data.length, data, source: 'yahoo' });
+  } catch (err) {
+    logger.warn('[api] intraday yahoo failed, falling back to local DB', { err });
+    const dbData = getPriceHistory(Date.now() - 7 * 86400000, Date.now(), 2880);
+    if (dbData.length > 0) return res.json({ interval, range, count: dbData.length, data: dbData, source: 'local' });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    res.status(503).json({ error: '分钟数据获取失败', detail: errMsg });
+  }
+});
+
 // ── 历史行情 API ──────────────────────────────────────────────
 app.get('/api/price/historical', async (req, res) => {
-  const range = (req.query['range'] as string) || '1y';
+  const range      = (req.query['range'] as string) || '1y';
+  const forceRefresh = req.query['refresh'] === '1';
   const validRanges = ['1mo', '3mo', '1y', '5y', 'max'];
   if (!validRanges.includes(range)) return res.status(400).json({ error: 'Invalid range' });
 
   try {
-    const { fetchHistoricalGold } = await import('../collectors/price/historical.collector');
+    const { fetchHistoricalGold, clearHistoricalCache } = await import('../collectors/price/historical.collector');
+    if (forceRefresh) clearHistoricalCache(range as '1mo' | '3mo' | '1y' | '5y' | 'max');
     const data = await fetchHistoricalGold(range as '1mo' | '3mo' | '1y' | '5y' | 'max');
-    res.json({ range, count: data.length, data });
+    res.json({ range, count: data.length, data, source: 'remote' });
   } catch (err) {
     logger.warn('[api] historical fetch failed, falling back to local DB', { err });
-    // 降级：Yahoo Finance 被墙时使用本地数据库历史数据
+    // 降级：外部 API 不可用时使用本地数据库历史数据
     try {
       const { getDailyOHLCV } = require('../storage/dao');
       const daysMap: Record<string, number> = { '1mo': 30, '3mo': 90, '1y': 365, '5y': 1825, 'max': 9999 };
@@ -169,21 +218,22 @@ app.get('/api/price/historical', async (req, res) => {
         date: string; open: number; high: number; low: number; close: number; volume: number;
       }>;
       if (rows.length > 0) {
-        const data = rows.reverse().map(r => ({
+        const fallbackData = rows.reverse().map(r => ({
           timestamp: new Date(r.date).getTime(),
-          open: r.open,
-          high: r.high,
-          low: r.low,
+          open:  r.open,
+          high:  r.high,
+          low:   r.low,
           close: r.close,
           volume: r.volume ?? 0,
-          timeframe: range === '1mo' || range === '3mo' ? '1d' : '1w',
+          timeframe: ['1mo', '3mo', '1y'].includes(range) ? '1d' : '1w',
         }));
-        return res.json({ range, count: data.length, data, source: 'local' });
+        return res.json({ range, count: fallbackData.length, data: fallbackData, source: 'local' });
       }
     } catch (fallbackErr) {
       logger.error('[api] local DB fallback also failed', { fallbackErr });
     }
-    res.status(503).json({ error: 'Failed to fetch historical data' });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    res.status(503).json({ error: '历史数据获取失败，请稍后重试', detail: errMsg });
   }
 });
 

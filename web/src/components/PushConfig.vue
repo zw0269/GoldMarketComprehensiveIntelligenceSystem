@@ -49,10 +49,7 @@
 
     <!-- 配置说明 -->
     <div class="env-tip">
-      <div class="env-title">📋 配置方法（在 .env 文件中设置）</div>
-      <pre class="env-block">DINGTALK_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxxx
-DINGTALK_SECRET=SECxxxxxxxxxxxxxxxx  # 加签密钥（可选）</pre>
-      <div class="env-note">修改 .env 后需重启后端服务生效</div>
+
     </div>
 
   </div>

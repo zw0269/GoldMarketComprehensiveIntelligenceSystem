@@ -745,3 +745,101 @@ pm2 logs gold-sentinel   # 查看日志
 | ExchangeRate-API | 1500次/月 | 汇率数据 |
 
 > 最快启动：先注册 GoldAPI.io（30秒）+ FRED（填邮箱），即可运行价格采集和宏观数据。
+
+---
+
+## 会话 12（2026-04-07 ~ 2026-04-08）
+
+### 新增功能
+
+#### 1. 交易流水日志（TradingJournal）
+**涉及文件**
+- `src/storage/database.ts` — 新增 `trade_journal` 表（买卖独立记录，自动配对计算盈亏）
+- `src/storage/dao.ts` — 新增 6 个 DAO 函数：`insertJournalEntry`（自动算盈亏）、`getJournalEntries`、`countJournalEntries`、`deleteJournalEntry`、`getJournalStats`（含买卖总额/手续费汇总）、`buildJournalContextForAI`
+- `src/api/server.ts` — 新增 5 条路由：`GET/POST /api/journal`、`DELETE /api/journal/:id`、`GET /api/journal/stats`、`GET /api/journal/ai-context`
+- `web/src/api/index.ts` — 新增 5 个前端 API 方法
+- `web/src/components/TradingJournal.vue` — 新建组件：买卖记录表单（含配对盈亏预览）、流水列表、底部三栏汇总（买入/卖出/盈亏）、AI深度分析（五模块结构化提示词）
+- `web/src/App.vue` — 在「我的持仓」Tab 下方嵌入 TradingJournal
+
+**功能说明**
+- 记录每笔买入/卖出，卖出时填写配对买入 ID，系统自动计算：`(卖价 - 买价) × min(克数) - 卖出手续费 - 买入手续费`
+- 底部汇总：买入均价、卖出均价、已实现总盈亏、总手续费、净持仓克数、胜率
+- AI 分析提示词包含统计摘要注入 + 五大模块（绩效/行为/案例/建议/风险）
+
+---
+
+#### 2. 钉钉多维度推送提醒系统
+**涉及文件**
+- `src/processors/alert/price-level-monitor.ts` — 新建：整数关口穿越/52周高低突破/SGE溢价异常/日内大幅波动检测
+- `src/storage/dao.ts` — 新增 `get52WeekHighLow()`、`getYesterdayCloseCny()` 两个查询函数
+- `src/scheduler/scheduler.ts` — 整合到每分钟任务中；新增 `scheduleMorningReport()`（每日08:30早安播报）、`scheduleWeeklyOutlook()`（每周一09:00周度展望）
+- `src/api/server.ts` — 新增 `POST /api/push/test`（钉钉推送测试）、`GET /api/push/config`（配置查询）
+- `web/src/api/index.ts` — 新增 `getPushConfig`、`testDingTalk`
+- `web/src/components/PushConfig.vue` — 新建推送配置面板（状态显示、测试按钮、规则说明表格、.env 配置说明）
+- `web/src/App.vue` — 新增「🔔 推送提醒」Tab
+
+**13 条钉钉推送规则**
+
+| 类型 | 触发条件 | 冷却 |
+|------|---------|------|
+| 📍 整数关口穿越 | 价格穿越整10位（¥680/¥690…），百元关口标注⭐⭐⭐ | 同向4h |
+| 🏆 52周新高 | 突破过去52周最高价 | 6h |
+| 📉 52周新低 | 跌破过去52周最低价 | 6h |
+| 🚀 价格急涨 | 5分钟≥0.5% / 15分钟≥1% / 30分钟≥1.5% | 同向30min |
+| 💥 价格急跌 | 同上（下跌方向） | 同向30min |
+| 📈 日内大幅波动 | 较昨收±1.5%（普通）/ ±2.5%（大幅） | 3h |
+| 📊 SGE溢价异常 | \|溢价\| > $5/oz | 2h |
+| 🎯 交易信号 | AI信号为BUY/STRONG_BUY/SELL/STRONG_SELL | 同信号2h |
+| ⚠️ 持仓亏损预警 | 浮亏≥3%或触及止损价 | 每笔1次/运行期 |
+| ☀️ 早安播报 | 每交易日08:30，价格+持仓汇总 | 每日1次 |
+| 📅 周度展望 | 每周一09:00，上周回顾+本周关注 | 每周1次 |
+| 🌅 盘中快报 | 09:30/13:30/21:30 AI分析 | 每次3h |
+| 📰 重磅新闻 | AI评估影响力≥4/5 | 每条1次 |
+
+---
+
+### Bug 修复
+
+#### 3. AI 助手聊天无法滚动
+- **根因**：`.chat-messages` 使用 `flex:1` 但缺少 `min-height:0`，flex 子项默认 `min-height:auto` 会无限撑开父容器，`overflow-y:auto` 永远不触发
+- **修复**：`AIChat.vue` 的 `.chat-messages` 加 `min-height:0`；`.ai-chat` 改为 `height:100%` 跟随容器；`App.vue` 的 `.ai-chat-main` 设 `height:700px` 确保有明确尺寸
+
+#### 4. 交易流水底部汇总 + AI 提示词优化
+- `getJournalStats()` 新增字段：`buyCnt/buyTotalAmount/buyTotalGrams/sellCnt/sellTotalAmount/sellTotalGrams/totalFee`
+- `TradingJournal.vue` 列表底部新增三栏汇总表格
+- AI 分析提示词完全重写：注入统计摘要数据（含盈亏比）+ 五大结构化模块
+
+#### 5. AIQAHistory TypeScript 类型错误
+- `DIR_ICONS[r.meta.direction]`：`direction` 为 `string|undefined`，不能直接作为 `Record<string,string>` 索引
+- 修复：改为 `r.meta.direction ? DIR_ICONS[r.meta.direction] ?? '' : ''`
+
+#### 6. 问答历史内容显示不全
+- **根因**：`.qa-list` 有 `max-height:560px` 限制，展开长答案时被截断；`answer-text` 无独立滚动区
+- **修复**：去掉 `.qa-list` 的 `max-height`；`.answer-text` 加 `max-height:360px; overflow-y:auto`；`.ai-history-panel` 设 `height:700px; overflow-y:auto`
+
+#### 7. 价格采集每分钟崩溃（All price sources failed）
+- **根因**：`price-aggregator.ts` 只使用两个付费 API（MetalpriceAPI 月度配额耗尽/GoldAPI 403封锁），付费源全挂时无任何有效价格
+- **修复**：
+  - 接入 `fetchEastmoneyRealtimePrice`（免费三级链路：Yahoo Finance → 新浪SHFE → 腾讯财经），权重 0.95
+  - `metalprice.collector.ts` 加 `success` 检查防止 `rates.USD` 未定义崩溃
+  - GoldAPI 重试次数 3→1（403 认证失败不可恢复）
+  - 腾讯财经 `qt.gtimg.cn` 实测返回正确价格（$4658.60/oz）
+
+#### 8. TradeLog compact 模式未实现
+- **根因**：`<TradeLog compact />` 传了 prop 但 `defineProps` 未声明，组件在 420px 信号列内展示全量内容
+- **修复**：声明 `compact?: boolean` prop；compact=true 时隐藏统计栏/止损线/进度条/信号/快速买入/历史记录；平仓简化为单按钮；新增总浮动盈亏摘要行
+
+---
+
+### 项目统计（更新）
+
+| 指标 | 数值 |
+|------|------|
+| TypeScript 文件 | ~56个 |
+| Vue 组件 | 15个（新增 TradingJournal · PushConfig） |
+| API 路由 | 30+（新增 /journal · /push） |
+| 调度任务 | 16个（新增 早安播报 · 周度展望 · 价格关键位监控） |
+| 数据库表 | 14张（新增 trade_journal） |
+| 钉钉推送规则 | 13条 |
+| 价格采集链路 | 免费三级（Yahoo → 新浪SHFE → 腾讯）+ 付费双源 |
+

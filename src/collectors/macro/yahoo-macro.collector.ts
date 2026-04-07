@@ -48,18 +48,33 @@ function parseClose(val: number | string | undefined): number | null {
   return isFinite(n) && n > 0 ? n : null;
 }
 
+const STOOQ_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+};
+
+function parseStooqJson(raw: string): StooqResponse {
+  const fixed = raw
+    .replace(/"volume":\s*}/g, '"volume":null}')
+    .replace(/"volume":\s*,/g, '"volume":null,');
+  return JSON.parse(fixed) as StooqResponse;
+}
+
 async function fetchSymbol(indicator: string, stooqSymbol: string): Promise<IMacroData | null> {
   return withRetry(
     async () => {
-      const res = await axios.get<StooqResponse>(STOOQ_BASE, {
+      const res = await axios.get<string>(STOOQ_BASE, {
         params: { s: stooqSymbol, f: 'sd2t2ohlcv', e: 'json' },
+        headers: STOOQ_HEADERS,
+        responseType: 'text',
         timeout: 10000,
       });
 
-      const sym = res.data?.symbols?.[0];
+      const data = parseStooqJson(res.data);
+      const sym = data?.symbols?.[0];
       if (!sym) throw new Error(`Stooq ${stooqSymbol}: no symbol`);
 
-      const price = parseClose(sym.close);
+      const price = parseClose(sym.close as number | string | undefined);
       if (price === null) {
         throw new Error(`Stooq ${stooqSymbol}: invalid close="${sym.close}" (market may be closed)`);
       }

@@ -17,6 +17,7 @@ import {
   getLatestInventory,
   getLatestETFHolding,
   getPriceHistory,
+  buildIntelContext,
 } from '../../storage/dao';
 import {
   aggregateOHLCV,
@@ -209,6 +210,10 @@ function buildFullContext(
     lines.push(`净多头: ${netLong > 0 ? '+' : ''}${netLong} 合约 ${netLong > 150000 ? '← 机构高度看多' : netLong > 50000 ? '← 机构温和看多' : netLong < 0 ? '← 机构看空' : '← 中性'}`);
     lines.push(`非商业多头: ${cot['noncomm_long']} | 非商业空头: ${cot['noncomm_short']} (${cot['date']})`);
   }
+
+  // 三大前瞻指标（注入 AI 分析必读）
+  const intelCtx = buildIntelContext(macro);
+  lines.push(intelCtx);
 
   // 重要新闻
   const topNews = (news as Record<string, unknown>[])

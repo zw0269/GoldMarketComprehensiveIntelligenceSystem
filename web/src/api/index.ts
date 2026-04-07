@@ -23,6 +23,10 @@ export const api = {
   getAIBackend: () => http.get('/api/ai/backend').then(r => r.data),
   getIntraday: (interval = '5m', range = '5d') =>
     http.get('/api/price/intraday', { params: { interval, range }, timeout: 15000 }).then(r => r.data),
+  getForwardIntel: () =>
+    http.get('/api/intel/forward', { timeout: 8000 }).then(r => r.data),
+  getPentagonHistory: () =>
+    http.get('/api/intel/pentagon/history', { timeout: 8000 }).then(r => r.data),
   getHistorical: (range = '1y') =>
     http.get('/api/price/historical', { params: { range }, timeout: 35000 }).then(r => r.data),
   getHistoricalRefresh: (range = '1y') =>

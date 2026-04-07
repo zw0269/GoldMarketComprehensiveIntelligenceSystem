@@ -2,7 +2,7 @@
 
 > 项目：黄金市场全景情报系统（积存金短线交易辅助）
 > 技术栈：Node.js + TypeScript + SQLite + Vue 3 + ECharts + Claude API
-> 最后更新：2026-04-07（会话13）
+> 最后更新：2026-04-07（会话14）
 
 ---
 
@@ -273,6 +273,53 @@ CREATE TABLE ai_interaction_log (
 - **邮件**：HTML模板，含彩色变动百分比大字体、价格前后对比表、风险提示文字
 
 **运营说明：** 此监控与每1分钟的价格采集共用数据库记录，无额外 API 调用，资源消耗极低。
+
+---
+
+### 会话 14 — 2026-04-07：三大前瞻指标监控系统
+
+**用户需求：** 增加外围局势判断的三个前瞻指标到消息监控，并在每次 AI 分析时自动注入。
+
+**三大指标说明：**
+| 指标 | 阈值 | 操作逻辑 |
+|------|------|---------|
+| ① 五角大楼披萨指数 | >40 警惕 / >60 大事酝酿 | 指数超60立即布局最防守品种 |
+| ② 美10年期国债收益率 | >4.4% / <4.3% | >4.4%看科技暴跌，<4.3%买防守品种 |
+| ③ Polymarket 预测市场 | 事件概率 | 全球聪明钱真金白银押注，提前反映预期 |
+
+| 操作 | 涉及文件 | 说明 |
+|------|---------|------|
+| 新建 `src/collectors/intel/pentagon-pizza.collector.ts` | 采集层 | GDELT全球新闻API统计五角大楼/美军相关"紧急/夜间/部署"新闻量，映射0-100军事活动指数（>40警戒/>60高危）|
+| 新建 `src/collectors/intel/polymarket.collector.ts` | 采集层 | Polymarket公开API获取全球前100大市场，筛选战争/经济/政治相关事件，返回YES概率+成交量 |
+| 修改 `src/collectors/macro/yahoo-macro.collector.ts` | 采集层 | 新增 `TNX: '^TNX'` 符号，美10年期国债收益率自动纳入宏观数据采集（每5分钟） |
+| 修改 `src/storage/database.ts` | 存储层 | 新增 `intel_pentagon` 表（历史指数快照）和 `polymarket_markets` 表（UNIQUE market_id，只保留最新状态） |
+| 修改 `src/storage/dao.ts` | 存储层 | 新增 `insertPentagonPizza()` / `getLatestPentagonPizza()` / `upsertPolymarkets()` / `getLatestPolymarkets()` / `buildIntelContext()`（生成AI可读文本块） |
+| 修改 `src/scheduler/scheduler.ts` | 调度层 | 新增 `scheduleIntelCollectors()`（每30分钟采集五角大楼指数+Polymarket，启动时立即执行一次，指数≥60时WS广播告警） |
+| 修改 `src/api/server.ts` | API层 | 新增 `GET /api/intel/forward`（三指标聚合）和 `GET /api/intel/pentagon/history`；AI聊天注入 `buildIntelContext()` |
+| 修改 `src/processors/ai/idea-analyzer.ts` | AI层 | `buildFullContext()` 中注入 `buildIntelContext()`，每次想法分析自动携带三大前瞻指标 |
+| 修改 `web/src/api/index.ts` | 前端API | 新增 `getForwardIntel()` / `getPentagonHistory()` |
+| 新建 `web/src/components/ForwardIndicators.vue` | 前端组件 | 三卡片布局：①TNX收益率+信号标签 ②披萨指数进度条+级别色块 ③Polymarket前12市场列表（概率颜色：≥70%红/≥50%黄/<50%绿） |
+| 修改 `web/src/App.vue` | 前端 | 情报中心Tab顶部新增「🔭 三大前瞻指标」全宽 panel |
+
+**AI 注入方式（`buildIntelContext` 输出示例）：**
+```
+## 三大前瞻指标（外围风向标）
+**美国10年期国债收益率: 4.385%**
+  → 中性区间，持续观察
+  （傻瓜公式：>4.4%看科技暴跌，<4.3%买防守品种）
+**五角大楼披萨指数（军事活动）: 28/100** 🟢（23分钟前更新）
+  → 军事活动正常，外围局势平稳
+  （阈值：>40需警惕，>60大事酝酿立即防守）
+**Polymarket 全球聪明钱押注（前8大相关市场）:**
+  🟡 62% YES — Will US enter recession by end of 2025? （成交量$2.3M）
+  🔴 78% YES — Will there be a US-China trade deal? （成交量$1.1M）
+  ...
+```
+
+**定时采集计划：**
+- TNX：每5分钟（随 Yahoo 宏观采集器）
+- 五角大楼披萨指数：每30分钟（GDELT API，免费无需Key）
+- Polymarket：每30分钟（公开API，免费无需Key）
 
 ---
 

@@ -14,10 +14,11 @@ import dayjs from 'dayjs';
 const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
 const SYMBOLS: Record<string, string> = {
-  DXY: 'DX-Y.NYB',    // 美元指数
-  VIX: '^VIX',         // CBOE 恐慌指数
-  SILVER: 'SI=F',      // 白银期货
-  OIL: 'CL=F',         // 原油期货 (WTI)
+  DXY:    'DX-Y.NYB', // 美元指数
+  VIX:    '^VIX',     // CBOE 恐慌指数
+  SILVER: 'SI=F',     // 白银期货
+  OIL:    'CL=F',     // 原油期货 (WTI)
+  TNX:    '^TNX',     // 美国10年期国债收益率（%）← 全球资产定价之锚
 };
 
 async function fetchSymbol(symbol: string, indicator: string): Promise<IMacroData | null> {

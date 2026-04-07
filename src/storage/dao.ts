@@ -18,6 +18,11 @@ import dayjs from 'dayjs';
 // ── 价格 ─────────────────────────────────────────────────────
 
 export function insertPrice(price: IPriceData & { xauUsd: number }): void {
+  // 合法性校验：黄金价格应在 100–100000 USD/oz，防止倒数/空值写入脏数据
+  if (!price.xauUsd || price.xauUsd < 100 || price.xauUsd > 100000) {
+    console.warn(`[dao] insertPrice rejected: xauUsd=${price.xauUsd} out of range [100, 100000]`);
+    return;
+  }
   const db = getDB();
   db.prepare(`
     INSERT OR REPLACE INTO prices (ts, xau_usd, xau_cny_g, usd_cny, sge_price, sge_premium, source)
@@ -643,6 +648,120 @@ export function getAILogsByDateRange(fromTs: number, toTs: number): Record<strin
   return getDB().prepare(
     'SELECT * FROM ai_interaction_log WHERE ts BETWEEN ? AND ? ORDER BY ts ASC'
   ).all(fromTs, toTs) as Record<string, unknown>[];
+}
+
+// ── 前瞻情报：五角大楼披萨指数 ──────────────────────────────────
+
+export function insertPentagonPizza(data: {
+  score: number;
+  articleCount: number;
+  alertLevel: string;
+  interpretation: string;
+}): void {
+  getDB().prepare(`
+    INSERT INTO intel_pentagon (score, article_count, alert_level, interpretation)
+    VALUES (?, ?, ?, ?)
+  `).run(data.score, data.articleCount, data.alertLevel, data.interpretation);
+}
+
+export function getLatestPentagonPizza(): Record<string, unknown> | null {
+  return getDB().prepare(
+    'SELECT * FROM intel_pentagon ORDER BY ts DESC LIMIT 1'
+  ).get() as Record<string, unknown> | null;
+}
+
+export function getPentagonPizzaHistory(hours = 72): Record<string, unknown>[] {
+  const from = Date.now() - hours * 3600000;
+  return getDB().prepare(
+    'SELECT * FROM intel_pentagon WHERE ts >= ? ORDER BY ts DESC'
+  ).all(from) as Record<string, unknown>[];
+}
+
+// ── 前瞻情报：Polymarket ─────────────────────────────────────
+
+export function upsertPolymarkets(markets: Array<{
+  id: string; question: string; yesPrice: number; volume24h: number; endDate?: string;
+}>): void {
+  const db  = getDB();
+  const now = Date.now();
+  const stmt = db.prepare(`
+    INSERT INTO polymarket_markets (fetched_at, market_id, question, yes_price, volume24h, end_date)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(market_id) DO UPDATE SET
+      fetched_at = excluded.fetched_at,
+      question   = excluded.question,
+      yes_price  = excluded.yes_price,
+      volume24h  = excluded.volume24h,
+      end_date   = excluded.end_date
+  `);
+  const insert = db.transaction(() => {
+    for (const m of markets) {
+      stmt.run(now, m.id, m.question, m.yesPrice, m.volume24h, m.endDate ?? null);
+    }
+  });
+  insert();
+}
+
+export function getLatestPolymarkets(limit = 20): Record<string, unknown>[] {
+  return getDB().prepare(
+    'SELECT * FROM polymarket_markets ORDER BY volume24h DESC LIMIT ?'
+  ).all(limit) as Record<string, unknown>[];
+}
+
+/**
+ * 构建前瞻情报上下文文字块（供注入到 AI Prompt）
+ */
+export function buildIntelContext(macro: Record<string, number>): string {
+  const lines: string[] = ['', '## 三大前瞻指标（外围风向标）'];
+
+  // 1. 美10年期国债收益率
+  const tnx = macro['TNX'];
+  if (tnx != null) {
+    let tnxSignal = '中性区间';
+    if (tnx > 4.4) tnxSignal = '⚠️ 超过4.4%！看好科技股大跌，防守资金流入黄金的逻辑减弱';
+    else if (tnx < 4.3) tnxSignal = '✅ 跌破4.3%！防守资金回流，黄金等避险品种受益';
+    lines.push(`**美国10年期国债收益率: ${tnx.toFixed(3)}%**`);
+    lines.push(`  → ${tnxSignal}`);
+    lines.push('  （傻瓜公式：>4.4%看科技暴跌，<4.3%买防守品种）');
+  } else {
+    lines.push('**美国10年期国债收益率**: 暂无数据');
+  }
+
+  // 2. 五角大楼披萨指数
+  const pizza = getLatestPentagonPizza();
+  if (pizza) {
+    const score      = pizza['score'] as number;
+    const alertLevel = pizza['alert_level'] as string;
+    const interp     = pizza['interpretation'] as string;
+    const age        = Math.round((Date.now() - (pizza['ts'] as number)) / 60000);
+    let icon = '🟢';
+    if (alertLevel === 'critical') icon = '🔴';
+    else if (alertLevel === 'warning') icon = '🟠';
+    else if (alertLevel === 'caution') icon = '🟡';
+    lines.push(`**五角大楼披萨指数（军事活动）: ${score.toFixed(0)}/100** ${icon}（${age}分钟前更新）`);
+    lines.push(`  → ${interp}`);
+    lines.push('  （阈值：>40需警惕，>60大事酝酿立即防守）');
+  } else {
+    lines.push('**五角大楼披萨指数**: 暂无数据');
+  }
+
+  // 3. Polymarket 前5大相关市场
+  const polymarkets = getLatestPolymarkets(8);
+  if (polymarkets.length > 0) {
+    lines.push('**Polymarket 全球聪明钱押注（前8大相关市场）:**');
+    for (const m of polymarkets) {
+      const pct  = Math.round((m['yes_price'] as number) * 100);
+      const vol  = (m['volume24h'] as number) >= 1e6
+        ? `$${((m['volume24h'] as number) / 1e6).toFixed(1)}M`
+        : `$${Math.round((m['volume24h'] as number) / 1000)}K`;
+      const icon = pct >= 70 ? '🔴' : pct >= 50 ? '🟡' : '🟢';
+      lines.push(`  ${icon} ${pct}% YES — ${m['question']} （成交量${vol}）`);
+    }
+  } else {
+    lines.push('**Polymarket**: 暂无数据');
+  }
+
+  return lines.join('\n');
 }
 
 // ── AI 每日总结 ───────────────────────────────────────────────

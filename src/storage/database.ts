@@ -237,6 +237,29 @@ function initSchema(db: Database.Database): void {
       created_at  INTEGER DEFAULT (unixepoch() * 1000)
     );
 
+    -- ── 前瞻情报：五角大楼披萨指数历史 ────────────────────────
+    CREATE TABLE IF NOT EXISTS intel_pentagon (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts           INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      score        REAL NOT NULL,        -- 0-100 军事活动指数
+      article_count INTEGER NOT NULL,   -- GDELT 原始文章数
+      alert_level  TEXT NOT NULL,       -- normal/caution/warning/critical
+      interpretation TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_intel_pentagon_ts ON intel_pentagon(ts DESC);
+
+    -- ── 前瞻情报：Polymarket 市场快照 ──────────────────────────
+    CREATE TABLE IF NOT EXISTS polymarket_markets (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      fetched_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      market_id    TEXT NOT NULL UNIQUE,  -- UNIQUE：只保留最新快照
+      question     TEXT NOT NULL,
+      yes_price    REAL NOT NULL,         -- YES 概率 0.0-1.0
+      volume24h    REAL DEFAULT 0,
+      end_date     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_polymarket_vol ON polymarket_markets(volume24h DESC);
+
     -- ── Schema 版本 ───────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS schema_version (
       version     INTEGER PRIMARY KEY,

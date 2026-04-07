@@ -18,6 +18,10 @@ import {
   getMacroDashboard,
   getLatestNews,
   getAlertHistory,
+  getLatestPentagonPizza,
+  getPentagonPizzaHistory,
+  getLatestPolymarkets,
+  buildIntelContext,
 } from '../storage/dao';
 import dayjs from 'dayjs';
 
@@ -146,6 +150,49 @@ app.get('/api/premium/sge', (_req, res) => {
 // ── 告警 API ─────────────────────────────────────────────────
 app.get('/api/alerts/history', (_req, res) => {
   res.json(getAlertHistory(100));
+});
+
+// ── 三大前瞻指标 API ──────────────────────────────────────────
+app.get('/api/intel/forward', (_req, res) => {
+  const macro     = getMacroDashboard() as Record<string, number>;
+  const pizza     = getLatestPentagonPizza();
+  const polymarks = getLatestPolymarkets(20);
+  const tnx       = macro['TNX'] ?? null;
+
+  res.json({
+    tnx: {
+      value: tnx,
+      signal: tnx == null ? 'unknown'
+        : tnx > 4.4 ? 'risk_on_fear'    // 科技股压力，黄金逻辑分化
+        : tnx < 4.3 ? 'defensive_flow'  // 防守资金回流，黄金受益
+        : 'neutral',
+      interpretation: tnx == null ? '暂无数据'
+        : tnx > 4.4 ? `${tnx.toFixed(3)}% — 超过4.4%警戒线！科技股压力加大，防守资金流入逻辑减弱`
+        : tnx < 4.3 ? `${tnx.toFixed(3)}% — 跌破4.3%！防守资金回流，黄金等避险品种受益`
+        : `${tnx.toFixed(3)}% — 中性区间，持续观察`,
+    },
+    pentagonPizza: pizza ? {
+      score:          pizza['score'],
+      articleCount:   pizza['article_count'],
+      alertLevel:     pizza['alert_level'],
+      interpretation: pizza['interpretation'],
+      updatedAt:      pizza['ts'],
+    } : null,
+    polymarket: {
+      markets: polymarks.map(m => ({
+        question: m['question'],
+        yesPrice: m['yes_price'],
+        yesPct:   Math.round((m['yes_price'] as number) * 100),
+        volume24h: m['volume24h'],
+        endDate:  m['end_date'],
+      })),
+      updatedAt: polymarks[0]?.['fetched_at'] ?? null,
+    },
+  });
+});
+
+app.get('/api/intel/pentagon/history', (_req, res) => {
+  res.json(getPentagonPizzaHistory(72));
 });
 
 // ── 分钟级实时走势 API（Yahoo Finance GC=F）─────────────────────
@@ -485,6 +532,9 @@ app.post('/api/ai/chat', async (req, res) => {
       .map(n => `• ${n['title']} [${n['ai_direction'] ?? ''}·影响${n['ai_impact'] ?? '?'}分]`)
       .join('\n');
 
+    // 三大前瞻指标上下文
+    const intelCtx = buildIntelContext(macro as Record<string, number>);
+
     // 对话历史（限制最近6轮）
     const historyText = (history ?? []).slice(-6)
       .map(m => `${m['role'] === 'user' ? '用户' : 'AI'}：${m['content']}`)
@@ -499,6 +549,7 @@ app.post('/api/ai/chat', async (req, res) => {
       `【实时市场数据】`,
       priceCtx,
       macroCtx ? `宏观指标：${macroCtx}` : '',
+      intelCtx,
       newsCtx ? `最新要闻：\n${newsCtx}` : '',
       historyText ? `\n【对话历史】\n${historyText}` : '',
       `\n【用户提问】\n${question.trim()}`,

@@ -6,7 +6,9 @@ import cron from 'node-cron';
 import logger from '../utils/logger';
 import config from '../config';
 import { broadcast } from '../api/server';
-import { insertPrice, upsertInventory, upsertETFHolding, upsertMacroData, insertNews, cleanupOldMinuteData, upsertDailyOHLCV } from '../storage/dao';
+import { insertPrice, upsertInventory, upsertETFHolding, upsertMacroData, insertNews, cleanupOldMinuteData, upsertDailyOHLCV, insertPentagonPizza, upsertPolymarkets } from '../storage/dao';
+import { fetchPentagonPizzaIndex } from '../collectors/intel/pentagon-pizza.collector';
+import { fetchPolymarketMarkets } from '../collectors/intel/polymarket.collector';
 import { aggregatePrices } from '../collectors/price/price-aggregator';
 import { fetchCOMEXFutures } from '../collectors/price/comex-futures.collector';
 import { fetchCOMEXInventory } from '../collectors/inventory/comex-inventory.collector';
@@ -516,6 +518,60 @@ export function scheduleCleanup() {
   });
 }
 
+// ── 每30分钟：三大前瞻指标采集 ──────────────────────────────────
+// 1. 五角大楼披萨指数（军事活动代理，GDELT）
+// 2. Polymarket 预测市场（全球聪明钱）
+// TNX 由 Yahoo 宏观采集器（scheduleEvery5Min）自动采集，无需单独任务
+export function scheduleIntelCollectors() {
+  // 启动时立即执行一次
+  void (async () => {
+    try {
+      const [pizzaRes, polyRes] = await Promise.allSettled([
+        fetchPentagonPizzaIndex(),
+        fetchPolymarketMarkets(),
+      ]);
+      if (pizzaRes.status === 'fulfilled') {
+        insertPentagonPizza(pizzaRes.value);
+        logger.info('[intel] pentagon pizza init', { score: pizzaRes.value.score });
+      }
+      if (polyRes.status === 'fulfilled') {
+        upsertPolymarkets(polyRes.value.markets);
+        logger.info('[intel] polymarket init', { count: polyRes.value.relevantCount });
+      }
+    } catch (err) {
+      logger.warn('[intel] init fetch failed', { err });
+    }
+  })();
+
+  // 每30分钟定时更新
+  return cron.schedule('*/30 * * * *', async () => {
+    try {
+      const [pizzaRes, polyRes] = await Promise.allSettled([
+        fetchPentagonPizzaIndex(),
+        fetchPolymarketMarkets(),
+      ]);
+      if (pizzaRes.status === 'fulfilled') {
+        insertPentagonPizza(pizzaRes.value);
+        // 五角大楼指数高危时通过 WS 广播告警
+        if (pizzaRes.value.score >= 60) {
+          const { broadcast } = await import('../api/server');
+          broadcast('INTEL_ALERT', {
+            type: 'pentagon_pizza',
+            score: pizzaRes.value.score,
+            alertLevel: pizzaRes.value.alertLevel,
+            interpretation: pizzaRes.value.interpretation,
+          });
+        }
+      }
+      if (polyRes.status === 'fulfilled') {
+        upsertPolymarkets(polyRes.value.markets);
+      }
+    } catch (err) {
+      logger.warn('[intel] 30min fetch failed', { err });
+    }
+  });
+}
+
 export function startAllSchedulers(): cron.ScheduledTask[] {
   const tasks = [
     scheduleEveryMinute(),
@@ -534,6 +590,7 @@ export function startAllSchedulers(): cron.ScheduledTask[] {
     scheduleAutoAnalyst(),      // 每5分钟技术指标触发AI自动分析
     schedulePositionAdvisor(),  // 每5分钟持仓动态建议
     ...scheduleIntradayBrief(), // 09:30/13:30/21:30 盘中快报
+    scheduleIntelCollectors(),  // 每30分钟前瞻指标（披萨指数+Polymarket）
   ];
   logger.info('[scheduler] all tasks started', { count: tasks.length });
   return tasks;

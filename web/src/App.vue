@@ -104,6 +104,10 @@
       <div v-show="activeTab === 'intel'" class="tab-pane">
         <div class="pane-grid intel-grid">
           <section class="panel span2">
+            <h2>🔭 三大前瞻指标 · 外围风向标</h2>
+            <ForwardIndicators />
+          </section>
+          <section class="panel span2">
             <h2>📰 新闻情报流</h2>
             <NewsStream :news="latestNews" />
           </section>
@@ -145,8 +149,9 @@ import MacroDashboard from './components/MacroDashboard.vue';
 import InventoryPanel from './components/InventoryPanel.vue';
 import ETFPanel       from './components/ETFPanel.vue';
 import NewsStream     from './components/NewsStream.vue';
-import StrategyPanel  from './components/StrategyPanel.vue';
-import HistoricalChart from './components/HistoricalChart.vue';
+import StrategyPanel       from './components/StrategyPanel.vue';
+import HistoricalChart     from './components/HistoricalChart.vue';
+import ForwardIndicators   from './components/ForwardIndicators.vue';
 import IdeaWorkshop   from './components/IdeaWorkshop.vue';
 import SignalPanel    from './components/SignalPanel.vue';
 import TradeLog       from './components/TradeLog.vue';

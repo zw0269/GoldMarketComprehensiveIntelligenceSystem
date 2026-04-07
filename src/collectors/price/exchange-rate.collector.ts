@@ -1,8 +1,9 @@
 /**
  * 美元/人民币汇率采集器
- * 主源: exchangerate-api.com 免费端点（无需Key，云服务器可访问）
- * 备用: exchangerate-api.com v6 带Key版本
- * 注意: 新浪财经在云服务器返回 403，已移除
+ *
+ * 主源：exchangerate-api.com 免费端点（无需Key，云服务器实测 200）
+ * 备源：exchangerate-api.com v6 带Key版本
+ * 注意：新浪财经 hq.sinajs.cn 对云服务器返回 403，已移除。
  */
 import axios from 'axios';
 import config from '../../config';
@@ -10,9 +11,8 @@ import logger from '../../utils/logger';
 import { withRetry } from '../../utils/retry';
 
 let cachedRate: { rate: number; ts: number } | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5分钟缓存
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
-// 免费端点，无需 API Key，云服务器可访问
 async function fetchFromExchangeRateAPIFree(): Promise<number> {
   const res = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', {
     timeout: 8000,
@@ -23,7 +23,6 @@ async function fetchFromExchangeRateAPIFree(): Promise<number> {
   return rate;
 }
 
-// 带 Key 的 v6 版本（更高频率限制）
 async function fetchFromExchangeRateAPIV6(): Promise<number> {
   if (!config.api.exchangeRateKey) throw new Error('ExchangeRate API key not set');
   const res = await axios.get(
@@ -36,7 +35,6 @@ async function fetchFromExchangeRateAPIV6(): Promise<number> {
 }
 
 export async function fetchUsdCny(): Promise<number> {
-  // 返回缓存
   if (cachedRate && Date.now() - cachedRate.ts < CACHE_TTL_MS) {
     return cachedRate.rate;
   }
@@ -44,7 +42,6 @@ export async function fetchUsdCny(): Promise<number> {
   const rate = await withRetry(
     async () => {
       try {
-        // 优先使用免费端点（无需Key，云服务器可用）
         return await fetchFromExchangeRateAPIFree();
       } catch (err) {
         logger.warn('[exchange-rate] free API failed, trying v6', { err });

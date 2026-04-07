@@ -1,9 +1,8 @@
 /**
- * 上海黄金交易所 (SGE) Au99.99 价格采集器
+ * SGE Au99.99 价格采集器
  *
- * 主源：Stooq GC.F（USD/oz）× ExchangeRate-API（USD/CNY）÷ 31.1035 → CNY/g
- * 注意：Stooq 返回残缺 JSON（"volume":}），需 responseType:'text' 手动修复。
- *       新浪财经和东方财富均已对云服务器封锁，已移除。
+ * 主源：腾讯财经 hf_XAU（USD/oz）× ExchangeRate-API（USD/CNY）÷ 31.1035 → CNY/g
+ * 新浪财经和东方财富 push2 均对云服务器返回 403/连接失败，已移除。
  */
 import axios from 'axios';
 import logger from '../../utils/logger';
@@ -13,54 +12,38 @@ import type { IPriceData } from '../../types';
 
 const OZ_TO_GRAM = 31.1035;
 
-const STOOQ_HEADERS = {
+const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'application/json, text/plain, */*',
 };
 
-interface StooqSymbol {
-  symbol?: string;
-  close?: number | string | null;
-}
-interface StooqResponse {
-  symbols?: StooqSymbol[];
-}
-
-function parseStooqJson(raw: string): StooqResponse {
-  const fixed = raw
-    .replace(/"volume":\s*}/g, '"volume":null}')
-    .replace(/"volume":\s*,/g, '"volume":null,');
-  return JSON.parse(fixed) as StooqResponse;
-}
-
-async function fetchFromStooq(): Promise<{ price: number; source: string }> {
+async function fetchFromTencent(): Promise<{ price: number; source: string }> {
   const [goldRes, usdCny] = await Promise.all([
-    axios.get<string>('https://stooq.com/q/l/?s=gc.f&f=sd2t2ohlcv&e=json', {
-      headers: STOOQ_HEADERS,
+    axios.get<string>('https://qt.gtimg.cn/q=hf_XAU', {
+      headers: HEADERS,
       responseType: 'text',
-      timeout: 12000,
+      timeout: 10000,
     }),
     fetchUsdCny(),
   ]);
 
-  const data = parseStooqJson(goldRes.data);
-  const sym = data?.symbols?.[0];
-  if (!sym) throw new Error('Stooq GC.F: no symbol');
+  const match = (goldRes.data as string).match(/v_\w+="([^"]+)"/);
+  if (!match) throw new Error('Tencent hf_XAU: parse failed');
 
-  const close = typeof sym.close === 'string' ? parseFloat(sym.close) : (sym.close ?? NaN);
-  if (!close || isNaN(close) || close <= 0) {
-    throw new Error(`Stooq GC.F: invalid close="${sym.close}"`);
+  const parts = match[1].split(',');
+  const xauUsd = parseFloat(parts[0]);
+  if (!xauUsd || isNaN(xauUsd) || xauUsd <= 0) {
+    throw new Error(`Tencent hf_XAU: invalid price="${parts[0]}"`);
   }
 
-  const price = (close * usdCny) / OZ_TO_GRAM;
-  logger.debug(`[sge] Stooq $${close}/oz × ${usdCny} = ${price.toFixed(2)} CNY/g`);
-  return { price, source: 'stooq-sge' };
+  const price = (xauUsd * usdCny) / OZ_TO_GRAM;
+  logger.debug(`[sge] Tencent $${xauUsd}/oz × ${usdCny} = ${price.toFixed(2)} CNY/g`);
+  return { price, source: 'tencent-sge' };
 }
 
 export async function fetchSGEPrice(): Promise<IPriceData | null> {
   return withRetry(
     async () => {
-      const result = await fetchFromStooq();
+      const result = await fetchFromTencent();
       return {
         source: result.source,
         timestamp: Date.now(),

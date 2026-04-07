@@ -13,12 +13,9 @@ import type { IPriceData } from '../../types';
 
 // 各数据源权重（API可靠度）
 const SOURCE_WEIGHTS: Record<string, number> = {
-  metalprice:    1.0,   // 付费 API，最高可信度
-  goldapi:       0.9,   // 付费 API
-  goldpricez:    0.7,
-  yahoo_gc:      0.85,  // Yahoo Finance GC=F，免费，稳定可信
-  sina_shfe:     0.75,  // 新浪 SHFE 现货，免费，国内直连
-  eastmoney_rt:  0.75,
+  metalprice: 1.0,
+  goldapi: 0.9,
+  goldpricez: 0.7,
 };
 
 // 每克troy盎司转换系数
@@ -50,14 +47,13 @@ export interface AggregatedPrice {
 }
 
 export async function aggregatePrices(): Promise<AggregatedPrice> {
-  // 并发采集所有价格源
-  // 注意：MetalpriceAPI 和 GoldAPI.io 在中国大陆云服务器均不可用（403/响应异常），已跳过
+  // MetalpriceAPI 和 GoldAPI.io 在中国大陆云服务器不可用，已跳过
+  // 主源：腾讯财经 hf_XAU（云服务器实测可用）
   const [emRealtimeData, sgeData, usdCny] = await Promise.allSettled([
     fetchEastmoneyRealtimePrice(),
     fetchSGEPrice(),
     fetchUsdCny(),
   ]);
-  // 兼容旧变量名，保持后续逻辑不变
   const metalpriceData: PromiseSettledResult<IPriceData | null> = { status: 'fulfilled', value: null };
   const goldAPIData: PromiseSettledResult<IPriceData | null>    = { status: 'fulfilled', value: null };
 
@@ -84,7 +80,7 @@ export async function aggregatePrices(): Promise<AggregatedPrice> {
 
   addIfValid(metalpriceData);
   addIfValid(goldAPIData);
-  addIfValid(emRealtimeData, 0.8);  // 免费源，无 Key 也能运行
+  addIfValid(emRealtimeData, 0.9); // 腾讯财经主源
 
   if (xauSources.length === 0) {
     throw new Error('All price sources failed — cannot aggregate');

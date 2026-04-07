@@ -168,18 +168,23 @@ onMounted(() => {
 .ai-chat {
   display: flex;
   flex-direction: column;
-  height: 600px;
+  /* 高度跟随父容器，不设固定高度——父面板 .ai-chat-main 已设 min-height */
+  height: 100%;
+  min-height: 520px;
   gap: 10px;
 }
 
 /* 消息区 */
 .chat-messages {
   flex: 1;
+  /* min-height: 0 是 flex 子项实现 overflow-y: auto 的关键！
+     没有它，flex 会无限撑开，永远不会产生滚动条 */
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 4px 0;
+  padding: 4px 0 4px 2px;
 }
 
 .empty-hint {

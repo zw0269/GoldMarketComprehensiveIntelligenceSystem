@@ -60,10 +60,14 @@
 
       <!-- Tab 2：我的持仓 -->
       <div v-show="activeTab === 'position'" class="tab-pane">
-        <div class="pane-single">
+        <div class="position-layout">
           <section class="panel">
             <h2>💰 我的持仓 · 实时盈亏追踪</h2>
             <TradeLog ref="tradeLogFullRef" :current-price="cnyPrice" />
+          </section>
+          <section class="panel">
+            <h2>📒 交易流水日志 · 买卖记录 &amp; AI分析</h2>
+            <TradingJournal :current-price="cnyPrice" />
           </section>
         </div>
       </div>
@@ -140,6 +144,16 @@
         </div>
       </div>
 
+      <!-- Tab 7：推送提醒 -->
+      <div v-show="activeTab === 'push'" class="tab-pane">
+        <div class="pane-single">
+          <section class="panel">
+            <h2>🔔 钉钉推送提醒 · 配置与提醒规则</h2>
+            <PushConfig />
+          </section>
+        </div>
+      </div>
+
     </main>
   </div>
 </template>
@@ -157,11 +171,13 @@ import StrategyPanel       from './components/StrategyPanel.vue';
 import HistoricalChart     from './components/HistoricalChart.vue';
 import ForwardIndicators   from './components/ForwardIndicators.vue';
 import IdeaWorkshop   from './components/IdeaWorkshop.vue';
-import SignalPanel    from './components/SignalPanel.vue';
-import TradeLog       from './components/TradeLog.vue';
-import ReviewPanel    from './components/ReviewPanel.vue';
-import AIChat         from './components/AIChat.vue';
-import AIQAHistory    from './components/AIQAHistory.vue';
+import SignalPanel      from './components/SignalPanel.vue';
+import TradeLog         from './components/TradeLog.vue';
+import ReviewPanel      from './components/ReviewPanel.vue';
+import AIChat           from './components/AIChat.vue';
+import AIQAHistory      from './components/AIQAHistory.vue';
+import TradingJournal   from './components/TradingJournal.vue';
+import PushConfig       from './components/PushConfig.vue';
 
 // ── Tab 定义 ──
 const tabs = [
@@ -171,6 +187,7 @@ const tabs = [
   { id: 'market',   icon: '📈', label: '市场行情' },
   { id: 'intel',    icon: '📰', label: '情报中心' },
   { id: 'aichat',   icon: '🤖', label: 'AI 助手' },
+  { id: 'push',     icon: '🔔', label: '推送提醒' },
 ];
 const activeTab = ref('signal');
 
@@ -358,6 +375,9 @@ body { background: var(--dark); color: var(--text); font-family: 'JetBrains Mono
 /* Tab1: 信号 + 持仓并排 */
 .signal-grid { grid-template-columns: 1fr 420px; }
 
+/* Tab2: 持仓 + 交易日志垂直堆叠 */
+.position-layout { display: flex; flex-direction: column; gap: 12px; max-width: 1100px; }
+
 /* Tab4: 市场行情 2列 */
 .market-grid { grid-template-columns: 1fr 1fr; }
 
@@ -371,7 +391,11 @@ body { background: var(--dark); color: var(--text); font-family: 'JetBrains Mono
   gap: 12px;
   align-items: start;
 }
-.ai-chat-main    { min-height: 640px; }
+.ai-chat-main    { height: 700px; min-height: 520px; display: flex; flex-direction: column; }
+.ai-chat-main .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.ai-chat-main .panel > h2 { flex-shrink: 0; }
+/* AIChat 组件撑满面板剩余空间 */
+.ai-chat-main .panel > * { flex: 1; min-height: 0; }
 .ai-history-panel { min-height: 200px; }
 
 /* 响应式 */

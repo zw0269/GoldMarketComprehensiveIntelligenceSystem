@@ -833,3 +833,164 @@ export function getAIDailySummaries(limit = 30): Record<string, unknown>[] {
     'SELECT * FROM ai_daily_summary ORDER BY date DESC LIMIT ?'
   ).all(limit) as Record<string, unknown>[];
 }
+
+// ── 交易流水日志 ──────────────────────────────────────────────────
+
+export interface JournalEntry {
+  type: 'buy' | 'sell';
+  price_cny_g: number;
+  grams: number;
+  fee: number;
+  note?: string;
+  pair_id?: number | null; // 卖出时对应的买入ID
+}
+
+export function insertJournalEntry(entry: JournalEntry): number {
+  // 如果是卖出且指定了配对买入，自动计算盈亏
+  let pnl: number | null = null;
+  if (entry.type === 'sell' && entry.pair_id) {
+    const buyRow = getDB().prepare(
+      'SELECT price_cny_g, grams, fee FROM trade_journal WHERE id = ? AND type = ?'
+    ).get(entry.pair_id, 'buy') as { price_cny_g: number; grams: number; fee: number } | undefined;
+    if (buyRow) {
+      const sellGrams = Math.min(entry.grams, buyRow.grams);
+      pnl = (entry.price_cny_g - buyRow.price_cny_g) * sellGrams - entry.fee - buyRow.fee;
+    }
+  }
+
+  const result = getDB().prepare(`
+    INSERT INTO trade_journal (type, price_cny_g, grams, fee, note, pair_id, pnl)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    entry.type,
+    entry.price_cny_g,
+    entry.grams,
+    entry.fee,
+    entry.note ?? '',
+    entry.pair_id ?? null,
+    pnl,
+  );
+  return result.lastInsertRowid as number;
+}
+
+export function getJournalEntries(limit = 100, offset = 0): Record<string, unknown>[] {
+  return getDB().prepare(
+    'SELECT * FROM trade_journal ORDER BY ts DESC LIMIT ? OFFSET ?'
+  ).all(limit, offset) as Record<string, unknown>[];
+}
+
+export function countJournalEntries(): number {
+  const row = getDB().prepare('SELECT COUNT(*) as cnt FROM trade_journal').get() as { cnt: number };
+  return row.cnt;
+}
+
+export function deleteJournalEntry(id: number): void {
+  getDB().prepare('DELETE FROM trade_journal WHERE id = ?').run(id);
+}
+
+/** 汇总统计：总盈亏、胜率、笔数，以及买卖总额 */
+export function getJournalStats(): Record<string, unknown> {
+  const db = getDB();
+
+  // 卖出记录（已结盈亏）
+  const sells = db.prepare(
+    `SELECT pnl FROM trade_journal WHERE type='sell' AND pnl IS NOT NULL`
+  ).all() as Array<{ pnl: number }>;
+
+  // 买入汇总
+  const buyRow = db.prepare(
+    `SELECT COUNT(*) as cnt, COALESCE(SUM(price_cny_g * grams), 0) AS total_amount,
+            COALESCE(SUM(grams), 0) AS total_grams, COALESCE(SUM(fee), 0) AS total_fee
+     FROM trade_journal WHERE type='buy'`
+  ).get() as { cnt: number; total_amount: number; total_grams: number; total_fee: number };
+
+  // 卖出汇总
+  const sellRow = db.prepare(
+    `SELECT COUNT(*) as cnt, COALESCE(SUM(price_cny_g * grams), 0) AS total_amount,
+            COALESCE(SUM(grams), 0) AS total_grams, COALESCE(SUM(fee), 0) AS total_fee
+     FROM trade_journal WHERE type='sell'`
+  ).get() as { cnt: number; total_amount: number; total_grams: number; total_fee: number };
+
+  const wins     = sells.filter(r => r.pnl > 0);
+  const losses   = sells.filter(r => r.pnl <= 0);
+  const totalPnl = sells.reduce((s, r) => s + r.pnl, 0);
+  const avgWin   = wins.length   ? wins.reduce((s, r) => s + r.pnl, 0) / wins.length : 0;
+  const avgLoss  = losses.length ? losses.reduce((s, r) => s + r.pnl, 0) / losses.length : 0;
+  const totalFee = (buyRow.total_fee ?? 0) + (sellRow.total_fee ?? 0);
+
+  return {
+    total:           sells.length,
+    wins:            wins.length,
+    losses:          losses.length,
+    winRate:         sells.length ? Math.round((wins.length / sells.length) * 100) : 0,
+    totalPnl:        Math.round(totalPnl * 100) / 100,
+    avgPnl:          sells.length ? Math.round((totalPnl / sells.length) * 100) / 100 : 0,
+    avgWin:          Math.round(avgWin  * 100) / 100,
+    avgLoss:         Math.round(avgLoss * 100) / 100,
+    // 买入汇总
+    buyCnt:          buyRow.cnt,
+    buyTotalAmount:  Math.round((buyRow.total_amount ?? 0) * 100) / 100,
+    buyTotalGrams:   Math.round((buyRow.total_grams ?? 0) * 1000) / 1000,
+    // 卖出汇总
+    sellCnt:         sellRow.cnt,
+    sellTotalAmount: Math.round((sellRow.total_amount ?? 0) * 100) / 100,
+    sellTotalGrams:  Math.round((sellRow.total_grams ?? 0) * 1000) / 1000,
+    // 总手续费
+    totalFee:        Math.round(totalFee * 100) / 100,
+  };
+}
+
+// ── 52周高低点 & 昨日收盘（供关键位监控使用）──────────────────
+
+/** 获取过去52周内的 CNY/g 最高价与最低价（基于 prices_daily.xau_cny_g）*/
+export function get52WeekHighLow(): { high: number; low: number } | null {
+  const db = getDB();
+  const cutoff = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10);
+  const row = db.prepare(`
+    SELECT MAX(xau_cny_g) AS h, MIN(xau_cny_g) AS l
+    FROM prices_daily
+    WHERE date >= ? AND xau_cny_g IS NOT NULL
+  `).get(cutoff) as { h: number | null; l: number | null } | undefined;
+  if (!row || row.h === null || row.l === null) return null;
+  return { high: row.h, low: row.l };
+}
+
+/** 获取昨日日线收盘 CNY/g 价格 */
+export function getYesterdayCloseCny(): number | null {
+  const db = getDB();
+  const today = new Date().toISOString().slice(0, 10);
+  const row = db.prepare(`
+    SELECT xau_cny_g FROM prices_daily
+    WHERE date < ? AND xau_cny_g IS NOT NULL
+    ORDER BY date DESC LIMIT 1
+  `).get(today) as { xau_cny_g: number } | undefined;
+  return row?.xau_cny_g ?? null;
+}
+
+/** 生成 AI 可读的交易历史文本 */
+export function buildJournalContextForAI(): string {
+  const entries = getDB().prepare(
+    `SELECT * FROM trade_journal ORDER BY ts ASC LIMIT 200`
+  ).all() as Array<{ id: number; ts: number; type: string; price_cny_g: number; grams: number; fee: number; note: string; pair_id: number | null; pnl: number | null }>;
+
+  if (entries.length === 0) return '（暂无交易记录）';
+
+  const lines = entries.map(e => {
+    const date = new Date(e.ts).toLocaleDateString('zh-CN');
+    const base = `[${date}] ${e.type === 'buy' ? '买入' : '卖出'} ${e.grams}g @ ¥${e.price_cny_g}/g 手续费¥${e.fee}`;
+    const pnlStr = e.pnl !== null ? ` 盈亏¥${e.pnl > 0 ? '+' : ''}${e.pnl.toFixed(2)}` : '';
+    const noteStr = e.note ? ` 备注:${e.note}` : '';
+    return base + pnlStr + noteStr;
+  });
+
+  const stats = getJournalStats() as { total: number; wins: number; winRate: number; totalPnl: number; avgPnl: number };
+
+  return [
+    `=== 交易流水（共${entries.length}条）===`,
+    ...lines,
+    '',
+    `=== 统计汇总 ===`,
+    `已结交易: ${stats.total}笔 | 盈利: ${stats.wins}笔 | 胜率: ${stats.winRate}%`,
+    `累计盈亏: ¥${stats.totalPnl} | 平均每笔: ¥${stats.avgPnl}`,
+  ].join('\n');
+}

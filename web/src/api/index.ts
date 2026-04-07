@@ -63,6 +63,18 @@ export const api = {
     http.get('/api/ai/qa-log', { params: opts }).then(r => r.data),
   deleteQALog: (id: number) =>
     http.delete(`/api/ai/qa-log/${id}`).then(r => r.data),
+  // 交易流水日志
+  getJournal: (opts: { limit?: number; offset?: number } = {}) =>
+    http.get('/api/journal', { params: opts }).then(r => r.data),
+  getJournalStats: () => http.get('/api/journal/stats').then(r => r.data),
+  addJournalEntry: (entry: { type: 'buy' | 'sell'; price_cny_g: number; grams: number; fee: number; note?: string; pair_id?: number | null }) =>
+    http.post('/api/journal', entry).then(r => r.data),
+  deleteJournalEntry: (id: number) =>
+    http.delete(`/api/journal/${id}`).then(r => r.data),
+  getJournalAIContext: () => http.get('/api/journal/ai-context').then(r => r.data),
+  // 钉钉推送
+  getPushConfig: () => http.get('/api/push/config').then(r => r.data),
+  testDingTalk: () => http.post('/api/push/test', {}).then(r => r.data),
 };
 
 // ── WebSocket 连接 ────────────────────────────────────────────

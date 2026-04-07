@@ -26,6 +26,12 @@ import {
   getQALogs,
   countQALogs,
   deleteQALog,
+  insertJournalEntry,
+  getJournalEntries,
+  countJournalEntries,
+  deleteJournalEntry,
+  getJournalStats,
+  buildJournalContextForAI,
 } from '../storage/dao';
 import dayjs from 'dayjs';
 
@@ -524,6 +530,91 @@ app.delete('/api/ai/qa-log/:id', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
   }
+});
+
+// ── 交易流水日志 API ──────────────────────────────────────────
+app.get('/api/journal', (req, res) => {
+  const limit  = Math.min(parseInt(req.query['limit']  as string ?? '100', 10), 500);
+  const offset = parseInt(req.query['offset'] as string ?? '0', 10);
+  const rows   = getJournalEntries(limit, offset);
+  const total  = countJournalEntries();
+  res.json({ total, data: rows });
+});
+
+app.get('/api/journal/stats', (_req, res) => {
+  res.json(getJournalStats());
+});
+
+app.post('/api/journal', (req, res) => {
+  const { type, price_cny_g, grams, fee, note, pair_id } = req.body as Record<string, unknown>;
+  if (!type || !price_cny_g || !grams) {
+    return res.status(400).json({ error: 'type, price_cny_g, grams 为必填项' });
+  }
+  if (type !== 'buy' && type !== 'sell') {
+    return res.status(400).json({ error: 'type 必须为 buy 或 sell' });
+  }
+  try {
+    const id = insertJournalEntry({
+      type:        type as 'buy' | 'sell',
+      price_cny_g: Number(price_cny_g),
+      grams:       Number(grams),
+      fee:         Number(fee ?? 0),
+      note:        String(note ?? ''),
+      pair_id:     pair_id ? Number(pair_id) : null,
+    });
+    res.json({ ok: true, id });
+  } catch (err) {
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+app.delete('/api/journal/:id', (req, res) => {
+  const id = parseInt(req.params['id'] ?? '0', 10);
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    deleteJournalEntry(id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// 生成供 AI 分析的交易历史上下文
+app.get('/api/journal/ai-context', (_req, res) => {
+  res.json({ context: buildJournalContextForAI() });
+});
+
+// ── 钉钉推送测试 ─────────────────────────────────────────────
+app.post('/api/push/test', async (_req, res) => {
+  if (!config.push.dingtalkWebhook) {
+    return res.status(400).json({ error: '未配置 DINGTALK_WEBHOOK，请在 .env 中设置' });
+  }
+  try {
+    const { sendDingTalkBrief } = await import('../push/dingtalk');
+    const price = getLatestPrice() as Record<string, number> | null;
+    const cnyG  = price?.['xau_cny_g'];
+    const content = [
+      `## ✅ Gold Sentinel 推送测试`,
+      '',
+      cnyG ? `**当前金价**: ¥${(cnyG as number).toFixed(2)}/g` : '暂无价格数据',
+      '',
+      `> 如果您收到这条消息，说明钉钉 Webhook 配置正常！`,
+      `> ${new Date().toLocaleString('zh-CN')} · Gold Sentinel`,
+    ].join('\n');
+    const ok = await sendDingTalkBrief('✅ Gold Sentinel 推送测试', content);
+    res.json({ ok, message: ok ? '测试消息已发送，请查收钉钉' : '发送失败，请检查 Webhook 地址' });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── 推送配置信息 ──────────────────────────────────────────────
+app.get('/api/push/config', (_req, res) => {
+  res.json({
+    dingtalk: !!config.push.dingtalkWebhook,
+    telegram: !!(config.push.telegramToken && config.push.telegramChatId),
+    email:    !!(config.push.smtpUser && config.push.emailTo),
+  });
 });
 
 // ── AI 后端信息 ───────────────────────────────────────────────

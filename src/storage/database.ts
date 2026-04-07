@@ -272,6 +272,21 @@ function initSchema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_polymarket_vol ON polymarket_markets(volume24h DESC);
 
+    -- ── 交易流水日志（买/卖独立记录，自动配对计算盈亏）─────────
+    CREATE TABLE IF NOT EXISTS trade_journal (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts            INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      type          TEXT NOT NULL,        -- 'buy' | 'sell'
+      price_cny_g   REAL NOT NULL,        -- 成交价 CNY/g
+      grams         REAL NOT NULL,        -- 克数
+      fee           REAL NOT NULL DEFAULT 0, -- 手续费 CNY
+      note          TEXT DEFAULT '',
+      pair_id       INTEGER,             -- 配对买入记录ID（卖出时填写）
+      pnl           REAL                 -- 已实现盈亏（配对后计算）
+    );
+    CREATE INDEX IF NOT EXISTS idx_journal_ts   ON trade_journal(ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_journal_type ON trade_journal(type, ts DESC);
+
     -- ── Schema 版本 ───────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS schema_version (
       version     INTEGER PRIMARY KEY,

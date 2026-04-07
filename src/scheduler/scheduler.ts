@@ -27,6 +27,7 @@ import { sendSignalEmail, sendLossWarningEmail, sendPriceSpikeEmail } from '../p
 import { sendDingTalkBrief } from '../push/dingtalk';
 
 let lastPrice: number | null = null;
+let lastCnyPrice: number | null = null;
 
 // ── 休市判断（周六、周日国际黄金市场休市）──────────────────────
 function isMarketOpen(): boolean {
@@ -60,7 +61,7 @@ const SPIKE_RULES = [
   { windowMin: 30, threshold: 1.5,  level: 'CRITICAL' as const },
 ];
 
-// ── 每1分钟：价格采集 ─────────────────────────────────────────
+// ── 每1分钟：价格采集 + 关键位检测 ──────────────────────────────
 export function scheduleEveryMinute() {
   return cron.schedule('* * * * *', async () => {
     // 周末休市，跳过实时价格采集
@@ -78,7 +79,30 @@ export function scheduleEveryMinute() {
 
       // 广播 WebSocket
       broadcast('PRICE', agg);
-      lastPrice = agg.xauUsd;
+
+      // ── 关键位监控（整数关口 / 52W突破 / SGE溢价 / 日涨跌幅）──
+      const prevCny = lastCnyPrice;
+      lastPrice    = agg.xauUsd;
+      lastCnyPrice = agg.xauCny;
+
+      if (config.push.dingtalkWebhook) {
+        const {
+          checkIntegerLevelCross,
+          check52WeekBreakout,
+          checkSGEPremiumAnomaly,
+          checkDailyMoveAlert,
+        } = await import('../processors/alert/price-level-monitor');
+
+        const { getYesterdayCloseCny } = await import('../storage/dao');
+        const yesterdayClose = getYesterdayCloseCny();
+
+        await Promise.allSettled([
+          checkIntegerLevelCross(agg.xauCny, prevCny),
+          check52WeekBreakout(agg.xauCny),
+          checkSGEPremiumAnomaly(agg.sgePremiumUsd),
+          checkDailyMoveAlert(agg.xauCny, yesterdayClose),
+        ]);
+      }
     } catch (err) {
       logger.error('[scheduler] 1min price fetch failed', { err });
     }
@@ -496,6 +520,143 @@ export function scheduleAIDailySummary() {
   });
 }
 
+// ── 每日 08:30（周一至周五）：早安黄金价格播报 ─────────────────
+export function scheduleMorningReport() {
+  return cron.schedule('30 8 * * 1-5', async () => {
+    if (!config.push.dingtalkWebhook) return;
+    try {
+      const { getLatestPrice, getYesterdayCloseCny, getOpenPositions } = await import('../storage/dao');
+
+      const price = getLatestPrice() as Record<string, number> | null;
+      const cnyG  = price?.['xau_cny_g'];
+      const usdOz = price?.['xau_usd'];
+      if (!cnyG) return;
+
+      const yClose = getYesterdayCloseCny();
+      const moveCny = yClose ? cnyG - yClose : null;
+      const movePct = yClose ? ((cnyG - yClose) / yClose * 100) : null;
+      const arrow   = moveCny !== null ? (moveCny >= 0 ? '▲' : '▼') : '';
+      const moveStr = moveCny !== null && movePct !== null
+        ? `${arrow} ¥${Math.abs(moveCny).toFixed(2)}/g (${movePct >= 0 ? '+' : ''}${movePct.toFixed(2)}%)`
+        : '暂无对比数据';
+
+      // 持仓汇总
+      const positions = getOpenPositions() as Array<Record<string, unknown>>;
+      let posSection = '> 当前无持仓';
+      if (positions.length > 0) {
+        const totalGrams  = positions.reduce((s, p) => s + (p['grams'] as number), 0);
+        const totalCost   = positions.reduce((s, p) => s + (p['buy_price_cny_g'] as number) * (p['grams'] as number), 0);
+        const avgCost     = totalCost / totalGrams;
+        const totalPnl    = positions.reduce((s, p) => {
+          const g = p['grams'] as number;
+          const bp = p['buy_price_cny_g'] as number;
+          const fee = (p['buy_fee'] as number) ?? 0;
+          return s + (cnyG - bp) * g - fee;
+        }, 0);
+        const pnlSign = totalPnl >= 0 ? '+' : '';
+        posSection = [
+          `> 持仓 ${positions.length} 笔 · 共 ${totalGrams.toFixed(2)}g`,
+          `> 均价 ¥${avgCost.toFixed(2)}/g · 浮动盈亏 **${pnlSign}¥${totalPnl.toFixed(2)}**`,
+        ].join('\n');
+      }
+
+      // 今日是周一，加上"新的一周"提示
+      const isMonday = new Date().getDay() === 1;
+      const greeting = isMonday ? '新的一周，祝您交易顺利！' : '今日黄金市场已开盘，请关注价格动态。';
+
+      const content = [
+        `## ☀️ 早安黄金播报 · ${new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}`,
+        '',
+        `### 💰 黄金当前价格`,
+        `| | 价格 |`,
+        `|--|--|`,
+        `| CNY/g | **¥${cnyG.toFixed(2)}/g** |`,
+        usdOz ? `| USD/oz | $${usdOz.toFixed(2)}/oz |` : '',
+        yClose ? `| 昨收 | ¥${yClose.toFixed(2)}/g |` : '',
+        `| 较昨收 | ${moveStr} |`,
+        '',
+        `### 📊 我的持仓`,
+        posSection,
+        '',
+        `> 💡 ${greeting}`,
+        `> ${new Date().toLocaleString('zh-CN')} · Gold Sentinel`,
+      ].filter(Boolean).join('\n');
+
+      const { sendDingTalkBrief } = await import('../push/dingtalk');
+      await sendDingTalkBrief('☀️ 早安黄金播报', content);
+      logger.info('[scheduler] morning report sent', { cnyG: cnyG.toFixed(2) });
+    } catch (err) {
+      logger.error('[scheduler] morning report failed', { err });
+    }
+  });
+}
+
+// ── 每周一 09:00：周度展望播报 ────────────────────────────────
+export function scheduleWeeklyOutlook() {
+  return cron.schedule('0 9 * * 1', async () => {
+    if (!config.push.dingtalkWebhook) return;
+    try {
+      const { getDailyOHLCV, getLatestPrice } = await import('../storage/dao');
+
+      const price   = getLatestPrice() as Record<string, number> | null;
+      const cnyG    = price?.['xau_cny_g'];
+      if (!cnyG) return;
+
+      // 取上周7天的日线数据
+      const ohlcv = getDailyOHLCV(10) as Array<Record<string, unknown>>;
+      // 过滤出上周的数据（最近1-7天，排除今天）
+      const lastWeek = ohlcv.slice(1, 8); // 昨天往前7天
+
+      let weekSection = '> 暂无上周行情数据';
+      if (lastWeek.length > 0) {
+        const closes  = lastWeek.map(d => d['xau_cny_g'] as number).filter(Boolean);
+        const highs   = lastWeek.map(d => d['high'] as number).filter(Boolean);
+        const lows    = lastWeek.map(d => d['low'] as number).filter(Boolean);
+        const weekOpen  = closes[closes.length - 1];
+        const weekClose = closes[0];
+        const weekHigh  = highs.length ? Math.max(...highs) : null;
+        const weekLow   = lows.length  ? Math.min(...lows)  : null;
+        const weekMove  = weekClose && weekOpen ? ((weekClose - weekOpen) / weekOpen * 100) : null;
+
+        weekSection = [
+          `| 指标 | 数值 |`,
+          `|--|--|`,
+          weekOpen  ? `| 周初开盘 | ¥${weekOpen.toFixed(2)}/g |`  : '',
+          weekClose ? `| 周末收盘 | ¥${weekClose.toFixed(2)}/g |` : '',
+          weekHigh  ? `| 周内最高 | ¥${weekHigh.toFixed(2)}/g |`  : '',
+          weekLow   ? `| 周内最低 | ¥${weekLow.toFixed(2)}/g |`   : '',
+          weekMove  !== null ? `| 上周涨跌 | ${weekMove >= 0 ? '▲+' : '▼'}${weekMove.toFixed(2)}% |` : '',
+        ].filter(Boolean).join('\n');
+      }
+
+      const content = [
+        `## 📅 黄金周度展望 · ${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}`,
+        '',
+        `### 📈 上周行情回顾`,
+        weekSection,
+        '',
+        `### 💰 本周开盘价格`,
+        `**¥${cnyG.toFixed(2)}/g**`,
+        '',
+        '### 📌 本周关注要点',
+        '- 关注美联储官员讲话及经济数据（非农、CPI）对美元走势的影响',
+        '- 地缘政治及避险情绪是否延续',
+        '- SGE溢价变化是否反映国内需求趋势',
+        '- 技术面关键支撑/阻力位变化',
+        '',
+        '> 💡 本系统将持续监控价格关键位、异动及重要信号，发现变化第一时间推送通知。',
+        `> ${new Date().toLocaleString('zh-CN')} · Gold Sentinel`,
+      ].join('\n');
+
+      const { sendDingTalkBrief } = await import('../push/dingtalk');
+      await sendDingTalkBrief('📅 黄金周度展望', content);
+      logger.info('[scheduler] weekly outlook sent');
+    } catch (err) {
+      logger.error('[scheduler] weekly outlook failed', { err });
+    }
+  });
+}
+
 // ── 每日 00:05：日线 OHLCV 聚合（写入 prices_daily）────────────
 export function scheduleDailyOHLCV() {
   return cron.schedule('5 0 * * *', () => {
@@ -589,6 +750,8 @@ export function startAllSchedulers(): cron.ScheduledTask[] {
     schedulePriceSpikeMonitor(), // 每分钟价格异动检测
     scheduleAutoAnalyst(),      // 每5分钟技术指标触发AI自动分析
     schedulePositionAdvisor(),  // 每5分钟持仓动态建议
+    scheduleMorningReport(),    // 每日08:30 早安黄金播报
+    scheduleWeeklyOutlook(),    // 每周一09:00 周度展望
     ...scheduleIntradayBrief(), // 09:30/13:30/21:30 盘中快报
     scheduleIntelCollectors(),  // 每30分钟前瞻指标（披萨指数+Polymarket）
   ];

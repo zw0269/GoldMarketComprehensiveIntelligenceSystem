@@ -1,123 +1,82 @@
 /**
- * 免费实时金价采集器（无需任何 API Key）
+ * 实时金价采集器（无需任何 API Key）
  *
- * 主源：Yahoo Finance  GC=F（COMEX 黄金期货，USD/oz）
- * 备源：新浪财经 nf_AU0（SHFE 沪金主力，CNY/g → 换算 USD/oz）
+ * 主源：腾讯财经 qt.gtimg.cn hf_XAU（国际金价 USD/oz，云服务器实测可用）
+ * 备源：Stooq GC.F（需修复残缺 JSON）
  *
- * 经实测：
- *   - Yahoo Finance query1.finance.yahoo.com  ✅ 可访问，返回 ~$4655/oz
- *   - Sina hq.sinajs.cn/list=nf_AU0           ✅ 可访问，返回 ~1030 CNY/g
- *   - EastMoney push2.eastmoney.com           ❌ 国内环境被封
- *
- * 字段说明（Sina nf_AU0 逗号分隔）：
- *   [0] 合约名（GBK 编码，忽略）
- *   [1] 时间 HHMMSS
- *   [2] 昨结算
- *   [3] 今日最高
- *   [4] 今日最低
- *   [6] 买一价
- *   [7] 卖一价
- *   [8] 最新价 ← 使用此字段
- *   [10] 今结算
+ * 腾讯返回格式：v_hf_XAU="价格,涨跌,当前,买价,最高,最低,时间,bid,ask,..."
+ * fields[0] = 当前价（USD/oz）
  */
 import axios from 'axios';
 import logger from '../../utils/logger';
+import { withRetry } from '../../utils/retry';
 import type { IPriceData } from '../../types';
 
-const OZ_TO_GRAM = 31.1035;
-const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart';
+const STOOQ_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/plain, */*',
+};
 
-// ── 主源：Yahoo Finance GC=F ───────────────────────────────────
-async function fetchYahooGold(): Promise<number> {
-  const res = await axios.get(`${YAHOO_CHART}/GC%3DF`, {
-    params: { interval: '1d', range: '1d' },
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+// ── 主源：腾讯财经 hf_XAU ─────────────────────────────────────
+async function fetchTencentGold(): Promise<number> {
+  const res = await axios.get<string>('https://qt.gtimg.cn/q=hf_XAU', {
+    headers: STOOQ_HEADERS,
+    responseType: 'text',
     timeout: 10000,
   });
 
-  const chart  = (res.data as Record<string, unknown>)?.['chart'] as Record<string, unknown>;
-  const result = ((chart?.['result'] as unknown[]) ?? [])[0] as Record<string, unknown> | undefined;
-  if (!result) throw new Error('Yahoo GC=F: no result');
+  // 格式: v_hf_XAU="4658.42,0.17,4658.42,..."
+  const match = (res.data as string).match(/v_\w+="([^"]+)"/);
+  if (!match) throw new Error('Tencent hf_XAU: parse failed');
 
-  const meta  = result['meta'] as Record<string, unknown>;
-  const price = meta?.['regularMarketPrice'] as number | undefined;
-  if (!price || price <= 0) throw new Error(`Yahoo GC=F: invalid price ${price}`);
+  const parts = match[1].split(',');
+  const price = parseFloat(parts[0]);
+  if (!price || isNaN(price) || price <= 0) {
+    throw new Error(`Tencent hf_XAU: invalid price="${parts[0]}"`);
+  }
 
-  logger.debug(`[freeRT] Yahoo GC=F = $${price}/oz`);
+  logger.debug(`[freeRT] Tencent hf_XAU = $${price}/oz`);
   return price; // USD/oz
 }
 
-// ── 备源：新浪财经 nf_AU0 ──────────────────────────────────────
-// 汇率同时从新浪 fx_susdcny 取（两个请求并发）
-async function fetchSinaGold(): Promise<number> {
-  // 并发拿金价 + 汇率
-  const [goldRes, fxRes] = await Promise.all([
-    axios.get('https://hq.sinajs.cn/list=nf_AU0', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Referer':    'https://finance.sina.com.cn/',
-      },
-      timeout: 8000,
-      responseType: 'arraybuffer',
-      proxy: false,
-    }),
-    axios.get('https://hq.sinajs.cn/list=fx_susdcny', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Referer':    'https://finance.sina.com.cn/',
-      },
-      timeout: 8000,
-      responseType: 'arraybuffer',
-      proxy: false,
-    }),
-  ]);
+// ── 备源：Stooq GC.F ──────────────────────────────────────────
+async function fetchStooqGold(): Promise<number> {
+  const res = await axios.get<string>(
+    'https://stooq.com/q/l/?s=gc.f&f=sd2t2ohlcv&e=json',
+    { headers: STOOQ_HEADERS, responseType: 'text', timeout: 12000 }
+  );
 
-  // 解析金价（latin1 解码即可，中文字段会乱码但数字字段正常）
-  const goldText  = Buffer.from(goldRes.data as ArrayBuffer).toString('latin1');
-  const goldMatch = goldText.match(/"([^"]+)"/);
-  if (!goldMatch) throw new Error('Sina nf_AU0: parse failed');
+  const fixed = (res.data as string)
+    .replace(/"volume":\s*}/g, '"volume":null}')
+    .replace(/"volume":\s*,/g, '"volume":null,');
+  const data = JSON.parse(fixed) as { symbols?: Array<{ close?: number | string }> };
+  const sym = data?.symbols?.[0];
+  if (!sym) throw new Error('Stooq GC.F: no symbol');
 
-  const goldParts = goldMatch[1].split(',');
-  const priceCnyG = parseFloat(goldParts[8] ?? '');   // [8] = 最新价
-  if (!priceCnyG || isNaN(priceCnyG) || priceCnyG <= 0) {
-    throw new Error(`Sina nf_AU0: invalid price at [8]="${goldParts[8]}"`);
+  const close = typeof sym.close === 'string' ? parseFloat(sym.close) : (sym.close ?? NaN);
+  if (!close || isNaN(close) || close <= 0) {
+    throw new Error(`Stooq GC.F: invalid close="${sym.close}"`);
   }
 
-  // 解析汇率
-  const fxText  = Buffer.from(fxRes.data as ArrayBuffer).toString('latin1');
-  const fxMatch = fxText.match(/"([^"]+)"/);
-  const usdCny  = fxMatch ? parseFloat(fxMatch[1].split(',')[1] ?? '') : 7.25;
-  const validRate = (usdCny && !isNaN(usdCny) && usdCny > 5 && usdCny < 10) ? usdCny : 7.25;
-
-  const xauUsd = (priceCnyG * OZ_TO_GRAM) / validRate;
-  logger.debug(`[freeRT] Sina SHFE AU0 = ${priceCnyG} CNY/g, rate=${validRate}, equiv $${xauUsd.toFixed(0)}/oz`);
-  return xauUsd; // USD/oz
+  logger.debug(`[freeRT] Stooq GC.F = $${close}/oz`);
+  return close;
 }
 
-/**
- * 获取实时黄金价格（USD/oz）
- * 主源 Yahoo Finance，备源新浪 SHFE，均无需 API Key
- */
 export async function fetchEastmoneyRealtimePrice(): Promise<IPriceData | null> {
-  let xauUsd: number;
-  let source = 'yahoo_gc';
-
-  try {
-    xauUsd = await fetchYahooGold();
-  } catch (err) {
-    logger.warn('[freeRT] Yahoo GC=F failed, trying Sina SHFE', { err });
-    try {
-      xauUsd = await fetchSinaGold();
-      source = 'sina_shfe';
-    } catch (err2) {
-      logger.warn('[freeRT] Sina SHFE also failed', { err: err2 });
-      return null;
-    }
-  }
-
-  return {
-    source,
-    timestamp: Date.now(),
-    xauUsd,
-  };
+  return withRetry(
+    async () => {
+      let xauUsd: number;
+      let source = 'tencent';
+      try {
+        xauUsd = await fetchTencentGold();
+      } catch (err) {
+        logger.warn('[freeRT] Tencent failed, trying Stooq', { err });
+        xauUsd = await fetchStooqGold();
+        source = 'stooq';
+      }
+      return { source, timestamp: Date.now(), xauUsd };
+    },
+    'RealtimeGold',
+    { maxAttempts: 3, baseDelayMs: 2000 }
+  );
 }

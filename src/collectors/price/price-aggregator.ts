@@ -7,6 +7,7 @@ import { fetchMetalpriceData } from './metalprice.collector';
 import { fetchGoldAPIData } from './goldapi.collector';
 import { fetchSGEPrice } from './sge.collector';
 import { fetchUsdCny } from './exchange-rate.collector';
+import { fetchEastmoneyRealtimePrice } from './eastmoney-realtime.collector';
 import logger from '../../utils/logger';
 import type { IPriceData } from '../../types';
 
@@ -46,13 +47,15 @@ export interface AggregatedPrice {
 }
 
 export async function aggregatePrices(): Promise<AggregatedPrice> {
-  // 并发采集所有价格源
-  const [metalpriceData, goldAPIData, sgeData, usdCny] = await Promise.allSettled([
-    fetchMetalpriceData(),
-    fetchGoldAPIData(),
+  // MetalpriceAPI 和 GoldAPI.io 在中国大陆云服务器不可用，已跳过
+  // 主源：腾讯财经 hf_XAU（云服务器实测可用）
+  const [emRealtimeData, sgeData, usdCny] = await Promise.allSettled([
+    fetchEastmoneyRealtimePrice(),
     fetchSGEPrice(),
     fetchUsdCny(),
   ]);
+  const metalpriceData: PromiseSettledResult<IPriceData | null> = { status: 'fulfilled', value: null };
+  const goldAPIData: PromiseSettledResult<IPriceData | null>    = { status: 'fulfilled', value: null };
 
   // 提取 USD/CNY 汇率
   const rate = usdCny.status === 'fulfilled' && usdCny.value
@@ -77,6 +80,7 @@ export async function aggregatePrices(): Promise<AggregatedPrice> {
 
   addIfValid(metalpriceData);
   addIfValid(goldAPIData);
+  addIfValid(emRealtimeData, 0.9); // 腾讯财经主源
 
   if (xauSources.length === 0) {
     throw new Error('All price sources failed — cannot aggregate');

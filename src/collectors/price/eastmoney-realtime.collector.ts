@@ -21,10 +21,10 @@ interface StooqResponse {
   symbols?: StooqSymbol[];
 }
 
-// ── 主源：Stooq XAUUSD ────────────────────────────────────────
+// ── 主源：Stooq GC=F（COMEX 黄金期货连续合约）────────────────
 async function fetchStooqGold(): Promise<number> {
   const res = await axios.get<StooqResponse>(
-    'https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&e=json',
+    'https://stooq.com/q/l/?s=gc.f&f=sd2t2ohlcv&e=json',
     { timeout: 10000 }
   );
 
@@ -40,21 +40,18 @@ async function fetchStooqGold(): Promise<number> {
   return close; // USD/oz
 }
 
-// ── 备源：goldprice.org 公开接口 ──────────────────────────────
-async function fetchGoldPriceOrg(): Promise<number> {
+// ── 备源：Coinbase 现货金价（无需Key，云服务器可访问）────────
+async function fetchCoinbaseGold(): Promise<number> {
   const res = await axios.get(
-    'https://data-asg.goldprice.org/GetData/USD-XAU/1',
-    {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 8000,
-    }
+    'https://api.coinbase.com/v2/prices/XAU-USD/spot',
+    { timeout: 8000 }
   );
-  // 响应格式: ["price,change,changeperc,..."] 或数组
-  const data = res.data as string[] | undefined;
-  if (!data?.[0]) throw new Error('goldprice.org: empty response');
-  const price = parseFloat(String(data[0]).split(',')[0]);
-  if (!price || isNaN(price) || price <= 0) throw new Error(`goldprice.org: invalid price`);
-  logger.debug(`[freeRT] goldprice.org XAUUSD = $${price}/oz`);
+  const data = res.data as { data?: { amount?: string } };
+  const amount = data?.data?.amount;
+  if (!amount) throw new Error('Coinbase XAU-USD: no amount');
+  const price = parseFloat(amount);
+  if (!price || isNaN(price) || price <= 0) throw new Error(`Coinbase XAU-USD: invalid amount="${amount}"`);
+  logger.debug(`[freeRT] Coinbase XAU-USD = $${price}/oz`);
   return price; // USD/oz
 }
 
@@ -68,12 +65,12 @@ export async function fetchEastmoneyRealtimePrice(): Promise<IPriceData | null> 
   try {
     xauUsd = await fetchStooqGold();
   } catch (err) {
-    logger.warn('[freeRT] Stooq failed, trying goldprice.org', { err });
+    logger.warn('[freeRT] Stooq failed, trying Coinbase', { err });
     try {
-      xauUsd = await fetchGoldPriceOrg();
-      source = 'goldprice_org';
+      xauUsd = await fetchCoinbaseGold();
+      source = 'coinbase';
     } catch (err2) {
-      logger.warn('[freeRT] goldprice.org also failed', { err: err2 });
+      logger.warn('[freeRT] Coinbase also failed', { err: err2 });
       return null;
     }
   }

@@ -24,7 +24,7 @@ const STOOQ_BASE = 'https://stooq.com/q/l/';
 const SYMBOLS: Record<string, string> = {
   DXY:    'dxy.f',      // 美元指数
   VIX:    '^vix',       // CBOE 恐慌指数
-  SILVER: 'xagusd',     // 白银现货 USD/oz
+  SILVER: 'si.f',       // 白银期货 USD/oz
   OIL:    'cl.f',       // WTI 原油期货
   TNX:    'us10yt=rr',  // 美国10年期国债收益率
 };

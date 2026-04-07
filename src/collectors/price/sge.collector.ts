@@ -26,7 +26,7 @@ interface StooqResponse {
 async function fetchFromStooq(): Promise<{ price: number; source: string }> {
   const [goldRes, usdCny] = await Promise.all([
     axios.get<StooqResponse>(
-      'https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&e=json',
+      'https://stooq.com/q/l/?s=gc.f&f=sd2t2ohlcv&e=json',
       { timeout: 10000 }
     ),
     fetchUsdCny(),

@@ -50,14 +50,16 @@ export interface AggregatedPrice {
 }
 
 export async function aggregatePrices(): Promise<AggregatedPrice> {
-  // 并发采集所有价格源（eastmoney_rt 为无需 Key 的免费兜底源）
-  const [metalpriceData, goldAPIData, emRealtimeData, sgeData, usdCny] = await Promise.allSettled([
-    fetchMetalpriceData(),
-    fetchGoldAPIData(),
+  // 并发采集所有价格源
+  // 注意：MetalpriceAPI 和 GoldAPI.io 在中国大陆云服务器均不可用（403/响应异常），已跳过
+  const [emRealtimeData, sgeData, usdCny] = await Promise.allSettled([
     fetchEastmoneyRealtimePrice(),
     fetchSGEPrice(),
     fetchUsdCny(),
   ]);
+  // 兼容旧变量名，保持后续逻辑不变
+  const metalpriceData: PromiseSettledResult<IPriceData | null> = { status: 'fulfilled', value: null };
+  const goldAPIData: PromiseSettledResult<IPriceData | null>    = { status: 'fulfilled', value: null };
 
   // 提取 USD/CNY 汇率
   const rate = usdCny.status === 'fulfilled' && usdCny.value

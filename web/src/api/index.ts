@@ -58,6 +58,11 @@ export const api = {
     http.post('/api/ai/chat', { question, history }, { timeout: 600000 }).then(r => r.data),
   // AI 每日总结
   getAIDailySummaries: () => http.get('/api/ai/summaries').then(r => r.data),
+  // AI 问答历史
+  getQALog: (opts: { type?: string; limit?: number; offset?: number } = {}) =>
+    http.get('/api/ai/qa-log', { params: opts }).then(r => r.data),
+  deleteQALog: (id: number) =>
+    http.delete(`/api/ai/qa-log/${id}`).then(r => r.data),
 };
 
 // ── WebSocket 连接 ────────────────────────────────────────────

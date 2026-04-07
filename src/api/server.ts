@@ -22,6 +22,10 @@ import {
   getPentagonPizzaHistory,
   getLatestPolymarkets,
   buildIntelContext,
+  insertQALog,
+  getQALogs,
+  countQALogs,
+  deleteQALog,
 } from '../storage/dao';
 import dayjs from 'dayjs';
 
@@ -497,6 +501,31 @@ app.get('/api/trades/pnl', (req, res) => {
   res.json(getPositionSummary(currentCnyG));
 });
 
+// ── AI 问答历史 API ───────────────────────────────────────────
+app.get('/api/ai/qa-log', (req, res) => {
+  const type   = req.query['type'] as string | undefined;
+  const limit  = Math.min(parseInt(req.query['limit']  as string ?? '30', 10), 100);
+  const offset = parseInt(req.query['offset'] as string ?? '0', 10);
+  const rows   = getQALogs({ type, limit, offset });
+  const total  = countQALogs(type);
+  const parsed = rows.map(r => ({
+    ...r,
+    meta: r['meta'] ? (() => { try { return JSON.parse(r['meta'] as string); } catch { return null; } })() : null,
+  }));
+  res.json({ total, limit, offset, data: parsed });
+});
+
+app.delete('/api/ai/qa-log/:id', (req, res) => {
+  const id = parseInt(req.params['id'] ?? '0', 10);
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  try {
+    deleteQALog(id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
 // ── AI 后端信息 ───────────────────────────────────────────────
 app.get('/api/ai/backend', (_req, res) => {
   const { getAIBackendInfo } = require('../processors/ai/claude-client');
@@ -556,6 +585,14 @@ app.post('/api/ai/chat', async (req, res) => {
     ].filter(Boolean).join('\n');
 
     const answer = await callClaude(CHAT_SYSTEM, userMsg, 1500, 'chat');
+
+    // 保存干净 Q&A（只存用户原始问题 + AI回答，不含注入上下文）
+    setImmediate(() => {
+      try {
+        insertQALog({ type: 'chat', question: question.trim(), answer });
+      } catch { /* ignore log failure */ }
+    });
+
     res.json({ answer, ts: Date.now() });
   } catch (err) {
     logger.error('[api] ai chat failed', { err });

@@ -128,10 +128,14 @@
 
       <!-- Tab 6：AI 助手 -->
       <div v-show="activeTab === 'aichat'" class="tab-pane">
-        <div class="pane-single ai-chat-pane">
-          <section class="panel">
+        <div class="ai-chat-layout">
+          <section class="panel ai-chat-main">
             <h2>🤖 AI 助手 · 基于实时市场数据问答</h2>
             <AIChat />
+          </section>
+          <section class="panel ai-history-panel">
+            <h2>📋 问答历史记录</h2>
+            <AIQAHistory />
           </section>
         </div>
       </div>
@@ -157,6 +161,7 @@ import SignalPanel    from './components/SignalPanel.vue';
 import TradeLog       from './components/TradeLog.vue';
 import ReviewPanel    from './components/ReviewPanel.vue';
 import AIChat         from './components/AIChat.vue';
+import AIQAHistory    from './components/AIQAHistory.vue';
 
 // ── Tab 定义 ──
 const tabs = [
@@ -359,13 +364,21 @@ body { background: var(--dark); color: var(--text); font-family: 'JetBrains Mono
 /* Tab5: 情报中心 2列 */
 .intel-grid { grid-template-columns: 1fr 1fr; }
 
-/* Tab6: AI 助手 */
-.ai-chat-pane { max-width: 860px; }
+/* Tab6: AI 助手 双列布局 */
+.ai-chat-layout {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 12px;
+  align-items: start;
+}
+.ai-chat-main    { min-height: 640px; }
+.ai-history-panel { min-height: 200px; }
 
 /* 响应式 */
 @media (max-width: 900px) {
   .signal-grid, .market-grid, .intel-grid { grid-template-columns: 1fr; }
   .span2 { grid-column: 1; }
   .tab-btn { padding: 10px 12px; font-size: 12px; }
+  .ai-chat-layout { grid-template-columns: 1fr; }
 }
 </style>

@@ -18,6 +18,7 @@ import {
   getLatestETFHolding,
   getPriceHistory,
   buildIntelContext,
+  insertQALog,
 } from '../../storage/dao';
 import {
   aggregateOHLCV,
@@ -346,6 +347,26 @@ ${content}
     result.direction,
     result.tags?.join(',') ?? ''
   );
+
+  // 保存干净 Q&A 记录（供用户历史查阅）
+  setImmediate(() => {
+    try {
+      insertQALog({
+        type: 'idea',
+        question: content,
+        answer: result.summary + '\n\n' + (result.supporting?.join('\n') ?? ''),
+        meta: {
+          direction: result.direction,
+          score: result.score,
+          action: result.action,
+          entry: result.entry,
+          stopLoss: result.stopLoss,
+          target: result.target,
+          riskReward: result.riskReward,
+        },
+      });
+    } catch { /* ignore log failure */ }
+  });
 
   logger.info('[idea-analyzer] analysis complete', {
     id,

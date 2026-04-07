@@ -237,6 +237,18 @@ function initSchema(db: Database.Database): void {
       created_at  INTEGER DEFAULT (unixepoch() * 1000)
     );
 
+    -- ── AI 问答记录（用户可查阅的干净 Q&A，不含注入上下文）──────
+    CREATE TABLE IF NOT EXISTS ai_qa_log (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts           INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      type         TEXT NOT NULL,  -- 'chat' | 'idea' | 'review'
+      question     TEXT NOT NULL,  -- 用户原始输入（干净，不含注入数据）
+      answer       TEXT NOT NULL,  -- AI 完整回复
+      meta         TEXT            -- JSON 附加信息（如 idea 分析摘要、信号等）
+    );
+    CREATE INDEX IF NOT EXISTS idx_qa_log_ts   ON ai_qa_log(ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_qa_log_type ON ai_qa_log(type, ts DESC);
+
     -- ── 前瞻情报：五角大楼披萨指数历史 ────────────────────────
     CREATE TABLE IF NOT EXISTS intel_pentagon (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,

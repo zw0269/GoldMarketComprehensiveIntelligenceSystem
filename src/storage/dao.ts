@@ -650,6 +650,61 @@ export function getAILogsByDateRange(fromTs: number, toTs: number): Record<strin
   ).all(fromTs, toTs) as Record<string, unknown>[];
 }
 
+// ── AI 问答记录（干净 Q&A，供用户查阅）───────────────────────────
+
+export interface QARecord {
+  type: 'chat' | 'idea' | 'review';
+  question: string;
+  answer: string;
+  meta?: Record<string, unknown>;
+}
+
+export function insertQALog(record: QARecord): number {
+  const result = getDB().prepare(`
+    INSERT INTO ai_qa_log (type, question, answer, meta)
+    VALUES (?, ?, ?, ?)
+  `).run(
+    record.type,
+    record.question,
+    record.answer,
+    record.meta ? JSON.stringify(record.meta) : null
+  );
+  return result.lastInsertRowid as number;
+}
+
+export function getQALogs(opts: {
+  type?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Record<string, unknown>[] {
+  const { type, limit = 50, offset = 0 } = opts;
+  if (type) {
+    return getDB().prepare(
+      'SELECT * FROM ai_qa_log WHERE type = ? ORDER BY ts DESC LIMIT ? OFFSET ?'
+    ).all(type, limit, offset) as Record<string, unknown>[];
+  }
+  return getDB().prepare(
+    'SELECT * FROM ai_qa_log ORDER BY ts DESC LIMIT ? OFFSET ?'
+  ).all(limit, offset) as Record<string, unknown>[];
+}
+
+export function countQALogs(type?: string): number {
+  if (type) {
+    const row = getDB().prepare(
+      'SELECT COUNT(*) as cnt FROM ai_qa_log WHERE type = ?'
+    ).get(type) as { cnt: number };
+    return row.cnt;
+  }
+  const row = getDB().prepare(
+    'SELECT COUNT(*) as cnt FROM ai_qa_log'
+  ).get() as { cnt: number };
+  return row.cnt;
+}
+
+export function deleteQALog(id: number): void {
+  getDB().prepare('DELETE FROM ai_qa_log WHERE id = ?').run(id);
+}
+
 // ── 前瞻情报：五角大楼披萨指数 ──────────────────────────────────
 
 export function insertPentagonPizza(data: {

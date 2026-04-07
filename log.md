@@ -2,7 +2,7 @@
 
 > 项目：黄金市场全景情报系统（积存金短线交易辅助）
 > 技术栈：Node.js + TypeScript + SQLite + Vue 3 + ECharts + Claude API
-> 最后更新：2026-04-07（会话14）
+> 最后更新：2026-04-07（会话15）
 
 ---
 
@@ -273,6 +273,41 @@ CREATE TABLE ai_interaction_log (
 - **邮件**：HTML模板，含彩色变动百分比大字体、价格前后对比表、风险提示文字
 
 **运营说明：** 此监控与每1分钟的价格采集共用数据库记录，无额外 API 调用，资源消耗极低。
+
+---
+
+### 会话 15 — 2026-04-07：AI 问答历史记录系统
+
+**用户需求：** 把每次给 AI 的问题和 AI 的回复记录到数据库，在页面中可查看。
+
+**根因分析：** 已有 `ai_interaction_log` 表但存的是带全量上下文的脏数据（截断到2000字），不适合展示；且无任何查看 UI。
+
+| 操作 | 涉及文件 | 说明 |
+|------|---------|------|
+| 新增 `ai_qa_log` 表 | `src/storage/database.ts` | 存储干净 Q&A：`type(chat/idea/review)` + `question`（用户原始输入）+ `answer`（AI完整回复）+ `meta`（JSON，存方向/评分/价位等） |
+| 新增 DAO 方法 | `src/storage/dao.ts` | `insertQALog()` / `getQALogs({type,limit,offset})` / `countQALogs()` / `deleteQALog(id)` |
+| AI 聊天端点保存记录 | `src/api/server.ts` | `POST /api/ai/chat` 成功后 `setImmediate` 异步存 `type='chat'`，原始问题+AI回答 |
+| 想法工坊保存记录 | `src/processors/ai/idea-analyzer.ts` | 分析完成后异步存 `type='idea'`，idea内容+摘要/理由，meta带入场/止损/目标价 |
+| 新增查询/删除端点 | `src/api/server.ts` | `GET /api/ai/qa-log?type=&limit=&offset=`（带分页+过滤）/ `DELETE /api/ai/qa-log/:id` |
+| 新增前端 API | `web/src/api/index.ts` | `getQALog(opts)` / `deleteQALog(id)` |
+| 新建 `AIQAHistory.vue` | 前端组件 | 三类型 Tab（全部/AI聊天/想法分析）+ 分页列表 + 展开详情 + 单条删除；idea 类型头部显示方向/评分/操作建议；展开后显示入场/止损/目标价 Chip |
+| 改造 AI 助手 Tab 布局 | `web/src/App.vue` | 由单列改为双列（聊天窗 + 历史面板），响应式折叠为单列 |
+
+**Q&A 记录覆盖范围：**
+- ✅ AI 聊天（用户手动提问）
+- ✅ 想法工坊（用户提交想法分析）
+- ❌ 后台自动任务（新闻评估/信号生成/日报）→ 这些只在 `ai_interaction_log` 存，不在 Q&A 视图显示
+
+**数据流：**
+```
+用户问题 → API → callClaude() → 得到回答
+                              ↓ setImmediate（异步，不阻塞响应）
+                          insertQALog(type, question, answer, meta)
+                              ↓
+                      ai_qa_log 表（SQLite）
+                              ↓
+                  GET /api/ai/qa-log → AIQAHistory.vue
+```
 
 ---
 

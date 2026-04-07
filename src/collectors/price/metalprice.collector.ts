@@ -10,6 +10,7 @@ import { withRetry } from '../../utils/retry';
 import type { IPriceData } from '../../types';
 
 const BASE_URL = 'https://api.metalpriceapi.com/v1';
+const OZ_TO_GRAM = 31.1035;
 
 interface MetalpriceResponse {
   success: boolean;
@@ -36,15 +37,17 @@ export async function fetchMetalpriceData(): Promise<IPriceData | null> {
       });
 
       const { rates, timestamp } = res.data;
-      const xauUsd = 1 / rates['USD'];   // XAU/USD
-      const xauCny = 1 / rates['CNY'];   // XAU/CNY (per troy oz)
+      // MetalpriceAPI base=XAU: rates['USD'] = 每盎司黄金对应多少美元，直接就是 XAU/USD
+      // 注意：不能取倒数，1/rates['USD'] 是错的
+      const xauUsd = rates['USD'];                        // USD/oz
+      const xauCny = rates['CNY'] / OZ_TO_GRAM;          // CNY/g
       const usdCny = rates['CNY'] / rates['USD'];
 
       return {
         source: 'metalprice',
         timestamp: timestamp * 1000,
         xauUsd,
-        xauCny: xauCny / 31.1035,  // 转换为 CNY/g（1 troy oz = 31.1035 g）
+        xauCny,   // 已换算为 CNY/g
         usdCny,
       } satisfies IPriceData;
     },

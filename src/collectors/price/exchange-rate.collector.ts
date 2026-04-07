@@ -1,7 +1,8 @@
 /**
  * 美元/人民币汇率采集器
- * 主源: 新浪财经 USDCNY 实时汇率（免费）
- * 备用: exchangerate-api.com
+ * 主源: exchangerate-api.com 免费端点（无需Key，云服务器可访问）
+ * 备用: exchangerate-api.com v6 带Key版本
+ * 注意: 新浪财经在云服务器返回 403，已移除
  */
 import axios from 'axios';
 import config from '../../config';
@@ -11,33 +12,26 @@ import { withRetry } from '../../utils/retry';
 let cachedRate: { rate: number; ts: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5分钟缓存
 
-async function fetchFromSina(): Promise<number> {
-  const res = await axios.get('https://hq.sinajs.cn/list=fx_susdcny', {
-    headers: {
-      Referer: 'https://finance.sina.com.cn/',
-      'User-Agent': 'Mozilla/5.0',
-    },
+// 免费端点，无需 API Key，云服务器可访问
+async function fetchFromExchangeRateAPIFree(): Promise<number> {
+  const res = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', {
     timeout: 8000,
-    responseType: 'arraybuffer',
   });
-  const text = Buffer.from(res.data as ArrayBuffer).toString('latin1');
-  const match = text.match(/"([^"]+)"/);
-  if (!match) throw new Error('Sina USDCNY: parse failed');
-
-  const parts = match[1].split(',');
-  const rate = parseFloat(parts[1]);
-  if (!rate || isNaN(rate)) throw new Error(`Sina USDCNY: invalid "${parts[1]}"`);
+  const data = res.data as { rates?: Record<string, number> };
+  const rate = data?.rates?.CNY;
+  if (!rate) throw new Error('ExchangeRate-API free: no CNY rate');
   return rate;
 }
 
-async function fetchFromExchangeRateAPI(): Promise<number> {
+// 带 Key 的 v6 版本（更高频率限制）
+async function fetchFromExchangeRateAPIV6(): Promise<number> {
   if (!config.api.exchangeRateKey) throw new Error('ExchangeRate API key not set');
   const res = await axios.get(
     `https://v6.exchangerate-api.com/v6/${config.api.exchangeRateKey}/pair/USD/CNY`,
     { timeout: 8000 }
   );
   const data = res.data as { conversion_rate?: number };
-  if (!data.conversion_rate) throw new Error('ExchangeRate API: no rate');
+  if (!data.conversion_rate) throw new Error('ExchangeRate API v6: no rate');
   return data.conversion_rate;
 }
 
@@ -50,10 +44,11 @@ export async function fetchUsdCny(): Promise<number> {
   const rate = await withRetry(
     async () => {
       try {
-        return await fetchFromSina();
+        // 优先使用免费端点（无需Key，云服务器可用）
+        return await fetchFromExchangeRateAPIFree();
       } catch (err) {
-        logger.warn('[exchange-rate] Sina failed, trying ExchangeRate API', { err });
-        return fetchFromExchangeRateAPI();
+        logger.warn('[exchange-rate] free API failed, trying v6', { err });
+        return fetchFromExchangeRateAPIV6();
       }
     },
     'USD/CNY',

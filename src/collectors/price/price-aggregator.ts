@@ -7,14 +7,18 @@ import { fetchMetalpriceData } from './metalprice.collector';
 import { fetchGoldAPIData } from './goldapi.collector';
 import { fetchSGEPrice } from './sge.collector';
 import { fetchUsdCny } from './exchange-rate.collector';
+import { fetchEastmoneyRealtimePrice } from './eastmoney-realtime.collector';
 import logger from '../../utils/logger';
 import type { IPriceData } from '../../types';
 
 // 各数据源权重（API可靠度）
 const SOURCE_WEIGHTS: Record<string, number> = {
-  metalprice: 1.0,
-  goldapi: 0.9,
-  goldpricez: 0.7,
+  metalprice:    1.0,   // 付费 API，最高可信度
+  goldapi:       0.9,   // 付费 API
+  goldpricez:    0.7,
+  yahoo_gc:      0.85,  // Yahoo Finance GC=F，免费，稳定可信
+  sina_shfe:     0.75,  // 新浪 SHFE 现货，免费，国内直连
+  eastmoney_rt:  0.75,
 };
 
 // 每克troy盎司转换系数
@@ -46,10 +50,11 @@ export interface AggregatedPrice {
 }
 
 export async function aggregatePrices(): Promise<AggregatedPrice> {
-  // 并发采集所有价格源
-  const [metalpriceData, goldAPIData, sgeData, usdCny] = await Promise.allSettled([
+  // 并发采集所有价格源（eastmoney_rt 为无需 Key 的免费兜底源）
+  const [metalpriceData, goldAPIData, emRealtimeData, sgeData, usdCny] = await Promise.allSettled([
     fetchMetalpriceData(),
     fetchGoldAPIData(),
+    fetchEastmoneyRealtimePrice(),
     fetchSGEPrice(),
     fetchUsdCny(),
   ]);
@@ -77,6 +82,7 @@ export async function aggregatePrices(): Promise<AggregatedPrice> {
 
   addIfValid(metalpriceData);
   addIfValid(goldAPIData);
+  addIfValid(emRealtimeData, 0.8);  // 免费源，无 Key 也能运行
 
   if (xauSources.length === 0) {
     throw new Error('All price sources failed — cannot aggregate');

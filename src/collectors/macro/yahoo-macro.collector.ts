@@ -1,9 +1,15 @@
 /**
- * Yahoo Finance 宏观数据采集器
- * T-132: 美元指数 DXY
- * T-133: VIX 恐慌指数
- * T-135: 白银价格 (Gold/Silver Ratio)
- * T-136: 原油价格 (Gold/Oil Ratio)
+ * 宏观数据采集器（使用 Stooq 替代 Yahoo Finance）
+ * Stooq 为波兰金融数据平台，提供免费行情，中国大陆云服务器可访问
+ *
+ * 指标：
+ *   DXY  - 美元指数
+ *   VIX  - CBOE 恐慌指数
+ *   SILVER - 白银期货（美元/盎司）
+ *   OIL  - WTI 原油期货
+ *   TNX  - 美国10年期国债收益率（%）
+ *
+ * 注意：Yahoo Finance 在中国大陆已完全封锁（2021年），已移除。
  */
 import axios from 'axios';
 import logger from '../../utils/logger';
@@ -11,48 +17,68 @@ import { withRetry } from '../../utils/retry';
 import type { IMacroData } from '../../types';
 import dayjs from 'dayjs';
 
-const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart';
+// Stooq 行情接口
+const STOOQ_BASE = 'https://stooq.com/q/l/';
 
+// Stooq symbol 映射
 const SYMBOLS: Record<string, string> = {
-  DXY:    'DX-Y.NYB', // 美元指数
-  VIX:    '^VIX',     // CBOE 恐慌指数
-  SILVER: 'SI=F',     // 白银期货
-  OIL:    'CL=F',     // 原油期货 (WTI)
-  TNX:    '^TNX',     // 美国10年期国债收益率（%）← 全球资产定价之锚
+  DXY:    'dxy.f',      // 美元指数
+  VIX:    '^vix',       // CBOE 恐慌指数
+  SILVER: 'xagusd',     // 白银现货 USD/oz
+  OIL:    'cl.f',       // WTI 原油期货
+  TNX:    'us10yt=rr',  // 美国10年期国债收益率
 };
 
-async function fetchSymbol(symbol: string, indicator: string): Promise<IMacroData | null> {
+interface StooqSymbol {
+  symbol: string;
+  date: string;
+  open: number | string;
+  high: number | string;
+  low: number | string;
+  close: number | string;
+  volume: number | string;
+}
+interface StooqResponse {
+  symbols?: StooqSymbol[];
+}
+
+function parseClose(val: number | string | undefined): number | null {
+  if (val === undefined || val === null) return null;
+  const n = typeof val === 'string' ? parseFloat(val) : val;
+  return isFinite(n) && n > 0 ? n : null;
+}
+
+async function fetchSymbol(indicator: string, stooqSymbol: string): Promise<IMacroData | null> {
   return withRetry(
     async () => {
-      const res = await axios.get(`${YAHOO_CHART}/${encodeURIComponent(symbol)}`, {
-        params: { interval: '1d', range: '1d' },
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      const res = await axios.get<StooqResponse>(STOOQ_BASE, {
+        params: { s: stooqSymbol, f: 'sd2t2ohlcv', e: 'json' },
         timeout: 10000,
       });
 
-      const chart = (res.data as Record<string, unknown>)?.chart as Record<string, unknown>;
-      const result = ((chart?.result as unknown[]) ?? [])[0] as Record<string, unknown> | undefined;
-      if (!result) throw new Error(`Yahoo ${symbol}: no result`);
+      const sym = res.data?.symbols?.[0];
+      if (!sym) throw new Error(`Stooq ${stooqSymbol}: no symbol`);
 
-      const meta = result.meta as Record<string, unknown>;
-      const price = meta.regularMarketPrice as number;
-      if (!price) throw new Error(`Yahoo ${symbol}: no price`);
+      const price = parseClose(sym.close);
+      if (price === null) {
+        throw new Error(`Stooq ${stooqSymbol}: invalid close="${sym.close}" (market may be closed)`);
+      }
 
       return {
         date: dayjs().format('YYYY-MM-DD'),
         indicator,
         value: price,
-        source: 'yahoo',
+        source: 'stooq',
       };
     },
-    `Yahoo-${symbol}`,
+    `Stooq-${stooqSymbol}`,
     { maxAttempts: 3, baseDelayMs: 2000 }
   );
 }
 
 export async function fetchYahooMacro(): Promise<IMacroData[]> {
   const tasks = Object.entries(SYMBOLS).map(([indicator, symbol]) =>
-    fetchSymbol(symbol, indicator)
+    fetchSymbol(indicator, symbol)
   );
 
   const results = await Promise.allSettled(tasks);
@@ -62,10 +88,10 @@ export async function fetchYahooMacro(): Promise<IMacroData[]> {
     if (r.status === 'fulfilled' && r.value) {
       data.push(r.value);
     } else if (r.status === 'rejected') {
-      logger.warn('[yahoo-macro] fetch failed', { err: r.reason });
+      logger.warn('[macro] stooq fetch failed', { err: r.reason });
     }
   }
 
-  logger.info('[yahoo-macro] collected', { indicators: data.map(d => d.indicator) });
+  logger.info('[macro] collected', { indicators: data.map(d => d.indicator) });
   return data;
 }

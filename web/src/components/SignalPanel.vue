@@ -25,30 +25,59 @@
           </div>
         </div>
 
-        <!-- ── 中：价格三线区 ── -->
+        <!-- ── 中：价格三线区（方向感知） ── -->
         <div class="levels-zone">
-          <div class="level-card target-card" v-if="signal.target_profit">
-            <span class="lc-icon">🎯</span>
-            <span class="lc-label">止盈目标</span>
-            <span class="lc-price green">¥{{ signal.target_profit }}</span>
-            <span class="lc-delta" v-if="signal.price_at_signal">
-              +{{ ((signal.target_profit - signal.price_at_signal) / signal.price_at_signal * 100).toFixed(2) }}%
-            </span>
-          </div>
-          <div class="level-card entry-card" v-if="signal.entry_cny_g">
-            <span class="lc-icon">⬤</span>
-            <span class="lc-label">建议入场</span>
-            <span class="lc-price gold">¥{{ signal.entry_cny_g }}</span>
-            <span class="lc-rr" v-if="signal.risk_reward">风险比 1:{{ signal.risk_reward }}</span>
-          </div>
-          <div class="level-card stop-card" v-if="signal.stop_loss">
-            <span class="lc-icon">🛑</span>
-            <span class="lc-label">止损价位</span>
-            <span class="lc-price red">¥{{ signal.stop_loss }}</span>
-            <span class="lc-delta" v-if="signal.price_at_signal">
-              {{ ((signal.stop_loss - signal.price_at_signal) / signal.price_at_signal * 100).toFixed(2) }}%
-            </span>
-          </div>
+          <!-- BUY 方向：止损在下方（第三行），目标在上方（第一行） -->
+          <template v-if="!isSellSignal">
+            <div class="level-card target-card" v-if="signal.target_profit">
+              <span class="lc-icon">🎯</span>
+              <span class="lc-label">止盈目标</span>
+              <span class="lc-price green">¥{{ signal.target_profit }}</span>
+              <span class="lc-delta green-text" v-if="signal.price_at_signal">
+                +{{ ((signal.target_profit - signal.price_at_signal) / signal.price_at_signal * 100).toFixed(2) }}%
+              </span>
+            </div>
+            <div class="level-card entry-card" v-if="signal.entry_cny_g">
+              <span class="lc-icon">⬤</span>
+              <span class="lc-label">建议入场</span>
+              <span class="lc-price gold">¥{{ signal.entry_cny_g }}</span>
+              <span class="lc-rr" v-if="signal.risk_reward">风险比 1:{{ signal.risk_reward }}</span>
+            </div>
+            <div class="level-card stop-card" v-if="signal.stop_loss">
+              <span class="lc-icon">🛑</span>
+              <span class="lc-label">止损价位</span>
+              <span class="lc-price red">¥{{ signal.stop_loss }}</span>
+              <span class="lc-delta red-text" v-if="signal.price_at_signal">
+                {{ ((signal.stop_loss - signal.price_at_signal) / signal.price_at_signal * 100).toFixed(2) }}%
+              </span>
+            </div>
+          </template>
+
+          <!-- SELL 方向：止损在上方（第一行），目标在下方（第三行） -->
+          <template v-else>
+            <div class="level-card sell-stop-card" v-if="signal.stop_loss">
+              <span class="lc-icon">🚫</span>
+              <span class="lc-label">看空无效位（止损）</span>
+              <span class="lc-price orange">¥{{ signal.stop_loss }}</span>
+              <span class="lc-delta orange-text" v-if="signal.price_at_signal">
+                +{{ ((signal.stop_loss - signal.price_at_signal) / signal.price_at_signal * 100).toFixed(2) }}%
+              </span>
+            </div>
+            <div class="level-card entry-card" v-if="signal.entry_cny_g">
+              <span class="lc-icon">⬤</span>
+              <span class="lc-label">当前价 / 减持参考</span>
+              <span class="lc-price gold">¥{{ signal.entry_cny_g }}</span>
+              <span class="lc-rr" v-if="signal.risk_reward">盈亏比 1:{{ signal.risk_reward }}</span>
+            </div>
+            <div class="level-card sell-target-card" v-if="signal.target_profit">
+              <span class="lc-icon">📉</span>
+              <span class="lc-label">下行目标 / 支撑位</span>
+              <span class="lc-price red">¥{{ signal.target_profit }}</span>
+              <span class="lc-delta red-text" v-if="signal.price_at_signal">
+                {{ ((signal.target_profit - signal.price_at_signal) / signal.price_at_signal * 100).toFixed(2) }}%
+              </span>
+            </div>
+          </template>
         </div>
 
         <!-- ── 右：技术指标 + 理由 ── -->
@@ -81,6 +110,17 @@
             <li v-for="r in signal.reasons" :key="r">{{ r }}</li>
           </ul>
         </div>
+      </div>
+
+      <!-- SELL 信号说明横幅 -->
+      <div class="sell-notice" v-if="isSellSignal">
+        <span class="sn-icon">⚠️</span>
+        <span class="sn-text">
+          <b>减仓 / 观望信号</b>：当前不建议新建仓位。
+          若已持有黄金，可考虑在 <b>¥{{ signal.entry_cny_g }}/g</b> 附近逐步减持，
+          预期回调至支撑位 <b>¥{{ signal.target_profit }}/g</b>；
+          若价格突破 <b>¥{{ signal.stop_loss }}/g</b>，看空逻辑失效，谨慎操作。
+        </span>
       </div>
 
       <!-- ── 快速开仓区（仅买入信号显示） ── -->
@@ -213,7 +253,8 @@ const CLASSES: Record<string, string> = {
 
 const signalCls   = computed(() => signal.value ? (CLASSES[signal.value.signal] ?? '') : '');
 const signalLabel = computed(() => signal.value ? (LABELS[signal.value.signal] ?? signal.value.signal) : '');
-const isBuySignal = computed(() => signal.value?.signal.includes('BUY') ?? false);
+const isBuySignal  = computed(() => signal.value?.signal.includes('BUY')  ?? false);
+const isSellSignal = computed(() => signal.value?.signal.includes('SELL') ?? false);
 const confColor   = computed(() => {
   if (!signal.value) return '#888';
   if (signal.value.signal.includes('BUY'))  return '#00C853';
@@ -351,16 +392,22 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 /* 中：价格三线 */
 .levels-zone { display: flex; flex-direction: column; gap: 6px; }
 .level-card { display: flex; flex-direction: column; padding: 8px 10px; border-radius: 6px; border-left: 3px solid; background: #1a1a2e; }
-.target-card { border-left-color: #00C853; }
-.entry-card  { border-left-color: #D4AF37; }
-.stop-card   { border-left-color: #FF1744; }
+.target-card      { border-left-color: #00C853; }
+.entry-card       { border-left-color: #D4AF37; }
+.stop-card        { border-left-color: #FF1744; }
+.sell-stop-card   { border-left-color: #FF6D00; }   /* 橙色：看空无效位 */
+.sell-target-card { border-left-color: #FF1744; }   /* 红色：下行目标 */
 .lc-icon  { font-size: 10px; margin-bottom: 2px; }
 .lc-label { font-size: 10px; color: #666; }
 .lc-price { font-size: 15px; font-weight: 800; }
-.lc-price.green { color: #00C853; }
-.lc-price.gold  { color: #D4AF37; }
-.lc-price.red   { color: #FF1744; }
+.lc-price.green  { color: #00C853; }
+.lc-price.gold   { color: #D4AF37; }
+.lc-price.red    { color: #FF1744; }
+.lc-price.orange { color: #FF6D00; }
 .lc-delta { font-size: 10px; color: #888; }
+.lc-delta.green-text  { color: #00C853; }
+.lc-delta.red-text    { color: #FF1744; }
+.lc-delta.orange-text { color: #FF6D00; }
 .lc-rr    { font-size: 10px; color: #D4AF37; }
 
 /* 右：分析区 */
@@ -415,6 +462,21 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 .refresh-btn { font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid #2a2a4a; background: transparent; color: #888; cursor: pointer; }
 .refresh-btn:hover { border-color: #D4AF37; color: #D4AF37; }
 .refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* SELL 说明横幅 */
+.sell-notice {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255,109,0,0.08);
+  border: 1px solid rgba(255,109,0,0.3);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.6;
+}
+.sn-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.sn-text b { color: #FF6D00; }
 
 .error-msg { color: #FF6D00; font-size: 12px; }
 </style>

@@ -184,28 +184,28 @@
         </div>
         <div class="bs-col pnl-col">
           <div class="bs-head">盈亏</div>
+          <!-- 核心：总盈亏（实时）= 卖出总额 + 持仓市值 - 买入总额 - 手续费 -->
+          <div class="bs-row total-pnl-row" v-if="realTimePnl !== null">
+            <span class="bs-lbl float-lbl"><b>总盈亏</b> <span class="live-dot">●</span></span>
+            <span class="bs-val total-pnl" :class="realTimePnl >= 0 ? 'green' : 'red'">
+              {{ realTimePnl >= 0 ? '+' : '' }}¥{{ realTimePnl.toFixed(2) }}
+            </span>
+          </div>
+          <!-- 持仓市值（实时） -->
+          <div class="bs-row" v-if="netGrams > 0">
+            <span class="bs-lbl float-lbl">持仓市值 <span class="live-dot">●</span></span>
+            <span class="bs-val gold">¥{{ holdingValue.toFixed(2) }}</span>
+          </div>
+          <!-- 持仓均价 -->
+          <div class="bs-row" v-if="holdingAvgCost !== null && netGrams > 0">
+            <span class="bs-lbl">持仓均价</span>
+            <span class="bs-val">¥{{ holdingAvgCost!.toFixed(2) }}/g × {{ netGrams.toFixed(3) }}g</span>
+          </div>
+          <!-- 已实现（已结交易） -->
           <div class="bs-row">
             <span class="bs-lbl">已实现</span>
             <span class="bs-val" :class="stats.totalPnl >= 0 ? 'green' : 'red'">
               {{ stats.totalPnl >= 0 ? '+' : '' }}¥{{ stats.totalPnl.toFixed(2) }}
-            </span>
-          </div>
-          <!-- 浮动盈亏：实时计算，有未结持仓时显示 -->
-          <div class="bs-row" v-if="floatingPnl !== null">
-            <span class="bs-lbl float-lbl">浮动盈亏 <span class="live-dot">●</span></span>
-            <span class="bs-val" :class="floatingPnl >= 0 ? 'green' : 'red'">
-              {{ floatingPnl >= 0 ? '+' : '' }}¥{{ floatingPnl.toFixed(2) }}
-            </span>
-          </div>
-          <div class="bs-row" v-if="openAvgCost !== null && stats.openGrams > 0">
-            <span class="bs-lbl">持仓均价</span>
-            <span class="bs-val gold">¥{{ openAvgCost!.toFixed(2) }}/g × {{ stats.openGrams }}g</span>
-          </div>
-          <!-- 总盈亏 = 已实现 + 浮动 -->
-          <div class="bs-row total-pnl-row" v-if="totalPnlWithFloat !== null">
-            <span class="bs-lbl"><b>总盈亏</b></span>
-            <span class="bs-val total-pnl" :class="totalPnlWithFloat >= 0 ? 'green' : 'red'">
-              {{ totalPnlWithFloat >= 0 ? '+' : '' }}¥{{ totalPnlWithFloat.toFixed(2) }}
             </span>
           </div>
           <div class="bs-row">
@@ -217,10 +217,6 @@
             <span class="bs-val" :class="stats.winRate >= 50 ? 'green' : 'red'">
               {{ stats.winRate }}%（{{ stats.wins }}/{{ stats.total }}）
             </span>
-          </div>
-          <div class="bs-row">
-            <span class="bs-lbl">净持仓克数</span>
-            <span class="bs-val">{{ (stats.buyTotalGrams - stats.sellTotalGrams).toFixed(3) }} g</span>
           </div>
         </div>
       </div>
@@ -271,23 +267,28 @@ const aiResult   = ref('');
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
-// ── 实时浮动盈亏（随 currentPrice prop 自动更新）──────────────
-const floatingPnl = computed(() => {
+// ── 实时总盈亏（随 currentPrice prop 自动更新）────────────────
+// 公式：卖出总额 + 持仓市值 - 买入总额 - 总手续费
+// 持仓克数 = 买入总克数 - 卖出总克数（净持仓）
+const netGrams = computed(() => {
+  if (!stats.value) return 0;
+  return Math.max(0, stats.value.buyTotalGrams - stats.value.sellTotalGrams);
+});
+const holdingValue = computed(() =>
+  netGrams.value > 0 && currentPrice.value > 0
+    ? netGrams.value * currentPrice.value
+    : 0
+);
+// 总盈亏 = 已回收（卖出总额）+ 当前持仓市值 - 总投入（买入总额）- 总手续费
+const realTimePnl = computed(() => {
   if (!stats.value || !currentPrice.value) return null;
-  const { openGrams, openCostBasis, openFee } = stats.value;
-  if (!openGrams || openGrams <= 0) return null;
-  const avgCost = openCostBasis / openGrams;
-  return (currentPrice.value - avgCost) * openGrams - openFee;
+  const s = stats.value;
+  return s.sellTotalAmount + holdingValue.value - s.buyTotalAmount - s.totalFee;
 });
-const openAvgCost = computed(() => {
-  if (!stats.value?.openGrams) return null;
+// 持仓均价（来自后端 openCostBasis，仅用于展示参考）
+const holdingAvgCost = computed(() => {
+  if (!stats.value?.openGrams || stats.value.openGrams <= 0) return null;
   return stats.value.openCostBasis / stats.value.openGrams;
-});
-const totalPnlWithFloat = computed(() => {
-  if (!stats.value) return null;
-  const realized = stats.value.totalPnl;
-  const floating = floatingPnl.value ?? 0;
-  return realized + floating;
 });
 
 const form = reactive({

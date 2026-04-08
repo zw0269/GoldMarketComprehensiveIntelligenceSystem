@@ -525,7 +525,7 @@ export function scheduleMorningReport() {
   return cron.schedule('30 8 * * 1-5', async () => {
     if (!config.push.dingtalkWebhook) return;
     try {
-      const { getLatestPrice, getYesterdayCloseCny, getOpenPositions } = await import('../storage/dao');
+      const { getLatestPrice, getYesterdayCloseCny, getOpenPositions, getLatestNews, getLatestSignal } = await import('../storage/dao');
 
       const price = getLatestPrice() as Record<string, number> | null;
       const cnyG  = price?.['xau_cny_g'];
@@ -560,6 +560,22 @@ export function scheduleMorningReport() {
         ].join('\n');
       }
 
+      // 交易信号
+      const latestSignal = getLatestSignal() as Record<string, unknown> | null;
+      const signalEmoji: Record<string, string> = {
+        STRONG_BUY: '🟢🟢', BUY: '🟢', HOLD: '🟡', SELL: '🔴', STRONG_SELL: '🔴🔴',
+      };
+      const sigStr = latestSignal
+        ? `${signalEmoji[latestSignal['signal'] as string] ?? ''} **${latestSignal['signal']}** (评分${latestSignal['score']}, 置信度${latestSignal['confidence']}%)`
+        : '暂无信号';
+
+      // 近期重要新闻（最多3条）
+      const newsRows = (getLatestNews(20) as Array<Record<string, unknown>>)
+        .filter(n => (n['ai_impact'] as number) >= 3)
+        .slice(0, 3)
+        .map(n => `> · [${n['ai_impact']}/5 ${n['ai_direction']}] ${(n['title'] as string).slice(0, 60)}`);
+      const newsSection = newsRows.length > 0 ? newsRows.join('\n') : '> 暂无重要新闻';
+
       // 今日是周一，加上"新的一周"提示
       const isMonday = new Date().getDay() === 1;
       const greeting = isMonday ? '新的一周，祝您交易顺利！' : '今日黄金市场已开盘，请关注价格动态。';
@@ -575,8 +591,14 @@ export function scheduleMorningReport() {
         yClose ? `| 昨收 | ¥${yClose.toFixed(2)}/g |` : '',
         `| 较昨收 | ${moveStr} |`,
         '',
+        `### 📡 系统信号`,
+        `> ${sigStr}`,
+        '',
         `### 📊 我的持仓`,
         posSection,
+        '',
+        `### 📰 今晨重要新闻`,
+        newsSection,
         '',
         `> 💡 ${greeting}`,
         `> ${new Date().toLocaleString('zh-CN')} · Gold Sentinel`,

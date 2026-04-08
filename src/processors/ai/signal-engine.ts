@@ -75,16 +75,24 @@ export async function generateSignal(): Promise<TradingSignalResult> {
   const rsi = closes.length >= 15 ? calculateRSI(closes) : null;
   const macdResult = closes.length >= 26 ? calculateMACD(closes) : null;
   const macdHistogram = macdResult?.histogram ?? null;
+  const prevHistogram = macdResult?.prevHistogram ?? null;
   const bbResult = closes.length >= 20 ? calculateBollingerBands(closes) : null;
 
   let macdCross: string | null = null;
   let bbPosition: string | null = null;
   let priceVsMA20: string | null = null;
 
-  // MACD 趋势判断（通过柱线符号，单值无法判断金叉，用柱线方向替代）
+  // MACD 金叉/死叉检测：直方图符号变化 = 真正的 MACD 穿越信号线
   if (macdHistogram !== null) {
-    if (macdHistogram > 0)  macdCross = 'above_zero';
-    else                    macdCross = 'below_zero';
+    if (prevHistogram !== null && prevHistogram < 0 && macdHistogram > 0) {
+      macdCross = 'golden_cross';
+    } else if (prevHistogram !== null && prevHistogram > 0 && macdHistogram < 0) {
+      macdCross = 'death_cross';
+    } else if (macdHistogram > 0) {
+      macdCross = 'bullish';
+    } else {
+      macdCross = 'bearish';
+    }
   }
 
   const currentPrice = closes.length > 0 ? closes[closes.length - 1] : null;
@@ -140,8 +148,12 @@ export async function generateSignal(): Promise<TradingSignalResult> {
     else if (rsi > 55) { score -=  8; reasons.push(`RSI偏高 (${rsi.toFixed(1)})，中性偏空`); }
   }
 
-  // MACD (-25 ~ +25)
-  if (macdHistogram !== null) {
+  // MACD (-25 ~ +25)：金叉/死叉 > 趋势延续
+  if (macdCross === 'golden_cross') {
+    score += 25; reasons.push(`MACD金叉（柱线由负转正 ${prevHistogram?.toFixed(2)}→${macdHistogram?.toFixed(2)}），强反转信号`);
+  } else if (macdCross === 'death_cross') {
+    score -= 25; reasons.push(`MACD死叉（柱线由正转负 ${prevHistogram?.toFixed(2)}→${macdHistogram?.toFixed(2)}），强反转信号`);
+  } else if (macdHistogram !== null) {
     if (macdHistogram > 0) { score += 15; reasons.push(`MACD柱线为正 (${macdHistogram.toFixed(2)})，多头动能`); }
     else                   { score -= 15; reasons.push(`MACD柱线为负 (${macdHistogram.toFixed(2)})，空头动能`); }
   }
@@ -198,6 +210,12 @@ export async function generateSignal(): Promise<TradingSignalResult> {
       target_profit = nearSupport
         ? parseFloat(usdOzToCnyG(nearSupport, usdCny).toFixed(2))
         : parseFloat((xauCnyG * 0.975).toFixed(2));
+      // 止损：最近阻力位上方 0.3%；无阻力则距入场 1.5%
+      const slUsdSell = nearResistance ? nearResistance * 1.003 : currentPrice * 1.015;
+      stop_loss = parseFloat(usdOzToCnyG(slUsdSell, usdCny).toFixed(2));
+      const risk   = stop_loss - entry_cny_g;
+      const reward = entry_cny_g - (target_profit ?? entry_cny_g * 0.975);
+      risk_reward  = risk > 0 ? parseFloat((reward / risk).toFixed(2)) : null;
     }
   }
 

@@ -69,7 +69,7 @@ export function calculateMovingAverages(closes: number[]): Record<string, number
 }
 
 // T-213: MACD (12, 26, 9)
-export function calculateMACD(closes: number[]): { macd: number; signal: number; histogram: number } | null {
+export function calculateMACD(closes: number[]): { macd: number; signal: number; histogram: number; prevHistogram: number | null } | null {
   if (closes.length < 26) return null;
   const results = MACD.calculate({
     values: closes,
@@ -80,11 +80,13 @@ export function calculateMACD(closes: number[]): { macd: number; signal: number;
     SimpleMASignal: false,
   });
   const last = results[results.length - 1];
+  const prev = results[results.length - 2];
   if (!last) return null;
   return {
     macd: last.MACD ?? 0,
     signal: last.signal ?? 0,
     histogram: last.histogram ?? 0,
+    prevHistogram: prev ? (prev.histogram ?? null) : null,
   };
 }
 

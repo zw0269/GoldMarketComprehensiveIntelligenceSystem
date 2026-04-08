@@ -843,3 +843,86 @@ pm2 logs gold-sentinel   # 查看日志
 | 钉钉推送规则 | 13条 |
 | 价格采集链路 | 免费三级（Yahoo → 新浪SHFE → 腾讯）+ 付费双源 |
 
+---
+
+## 会话 13（2026-04-08）
+
+### 背景
+
+基于系统 AI 日报自我诊断（2026-04-08），发现并修复了以下问题：
+1. RSS 数据源失效（Kitco 404 + Reuters ECONNRESET）
+2. 新闻重复评估（同一文章被评估 4+ 次，浪费 AI Token）
+3. AI 价格幻觉（系统提示未说明 2026 年金价背景）
+4. 日报/早报无技术面数据注入（AI 凭空编造技术分析）
+5. 交易信号引擎 MACD 金叉检测不准 + SELL 信号缺止损
+
+---
+
+### 修复内容
+
+#### 1. RSS 数据源替换（`rss.collector.ts`）
+
+- 删除 `kitco`（URL 404）和 `reuters-gold`（TLS ECONNRESET）
+- 新增 `cnbc-gold` → `https://www.cnbc.com/id/10000664/device/rss/rss.html`（验证：200，30条）
+- 新增 `yahoo-finance` → `https://finance.yahoo.com/news/rssindex`（验证：200，46条）
+- 保留 `google-news-gold` 和 `google-news-geopolitics` 不变
+
+#### 2. 新闻 AI 重复评估去重（`news-assessor.ts`）
+
+- 新增 `normalizeTitle()` 函数：标题标准化（去标点/大小写/取前60字符）
+- `assessPendingNews()` 内维护 `seenTitles: Set<string>`，同批次重复标题直接标记 `neutral/1` 跳过
+- 防止来自多个 RSS 源的同一文章被重复调用 Claude API
+
+#### 3. AI 价格幻觉修复（`news-assessor.ts`）
+
+- 在 `SYSTEM_PROMPT` 开头添加 2026 年金价背景说明
+- 内容：当前 XAU/USD $4500-$5200/oz 是 2026 年真实市场价，非错误，不应被 AI 标记为异常
+
+#### 4. 技术面数据注入日报（`daily-brief.ts`）
+
+- 新增导入 `calculateRSI`、`calculateMACD`、`calculateBollingerBands`、`getLatestSignal`
+- 从 `getDailyOHLCV(30)` 的日线收盘价序列计算 RSI(14)、MACD(12,26,9)、BB(20,2σ)
+- 将技术指标结果（含 MACD 状态描述、BB 位置、系统信号）注入用户消息
+- 系统提示补充 `Use ONLY the technical indicator values provided`，防止 AI 幻觉
+
+#### 5. 早安播报加入新闻 + 信号（`scheduler.ts`）
+
+- `scheduleMorningReport()` 新增：
+  - 交易信号板块：显示最新 signal 级别 + 评分 + 置信度（含 emoji 颜色标记）
+  - 今晨重要新闻板块：最多 3 条 ai_impact >= 3 的新闻摘要
+- 早报从"纯价格快照"升级为"价格 + 信号 + 新闻"三维播报
+
+#### 6. MACD 金叉/死叉检测修复（`indicators.ts` + `signal-engine.ts`）
+
+- `calculateMACD()` 新增返回 `prevHistogram: number | null`（倒数第二根柱线值）
+- `signal-engine.ts` 用连续两根柱线符号变化检测真正的金叉/死叉：
+  - `prevHistogram < 0 && histogram > 0` → `golden_cross`（+25分，强信号）
+  - `prevHistogram > 0 && histogram < 0` → `death_cross`（-25分，强信号）
+  - 其余保持 `bullish/bearish` 趋势延续（±15分）
+- 变量名从 `above_zero/below_zero` 改为语义清晰的 `golden_cross/death_cross/bullish/bearish`
+
+#### 7. SELL 信号补充止损（`signal-engine.ts`）
+
+- SELL/STRONG_SELL 信号之前只有 `target_profit`，没有 `stop_loss`
+- 补充：止损 = 最近阻力位 × 1.003（无阻力则距入场价 +1.5%）
+- 同时计算 `risk_reward` 比率（风险 = 止损-入场，收益 = 入场-目标）
+
+#### 8. 盘中快报价格区间修正（`intraday-brief.ts`）
+
+- 系统提示中 `"正常在¥600-¥900之间"` → `"2026年市场价格正常在¥900-¥1200之间"`
+- 防止 AI 对当前价格产生"价格异常"的幻觉纠正
+
+---
+
+### 修改文件清单
+
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `src/collectors/news/rss.collector.ts` | 修复 | 替换 kitco/reuters → cnbc/yahoo |
+| `src/processors/ai/news-assessor.ts` | 修复+优化 | 标题去重 + 2026价格背景 |
+| `src/processors/ai/daily-brief.ts` | 优化 | 注入真实技术指标数据 |
+| `src/processors/ai/intraday-brief.ts` | 修复 | 价格区间注释修正 |
+| `src/processors/technical/indicators.ts` | 优化 | calculateMACD 返回 prevHistogram |
+| `src/processors/ai/signal-engine.ts` | 优化 | 真金叉检测 + SELL止损 |
+| `src/scheduler/scheduler.ts` | 优化 | 早安播报加入信号+新闻 |
+

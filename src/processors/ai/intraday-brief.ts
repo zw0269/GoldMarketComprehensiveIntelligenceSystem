@@ -46,7 +46,7 @@ const INTRADAY_SYSTEM = `你是 Gold Sentinel 的盘中分析师，负责每4小
   "positionAdvice": "持仓者建议（40字以内，若无持仓可填'暂无持仓建议'）"
 }
 
-⚠️ 价格单位：entry/stopLoss/target 必须是人民币/克（CNY/g），正常在¥600-¥900之间。`;
+⚠️ 价格单位：entry/stopLoss/target 必须是人民币/克（CNY/g），2026年市场价格正常在¥900-¥1200之间。`;
 
 function getCurrentSession(): string {
   const hour = dayjs().hour();

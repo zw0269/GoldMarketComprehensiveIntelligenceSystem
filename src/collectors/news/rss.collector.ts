@@ -1,6 +1,7 @@
 /**
  * RSS 新闻聚合引擎 (T-141)
- * 来源: Kitco / Reuters / 金十数据 / FX168 / Google News
+ * 来源: CNBC / Yahoo Finance / Google News
+ * Kitco (404) 和 Reuters (ECONNRESET) 已替换
  */
 import axios from 'axios';
 import * as cheerio from 'cheerio';
@@ -11,13 +12,13 @@ import dayjs from 'dayjs';
 
 const RSS_SOURCES = [
   {
-    name: 'kitco',
-    url: 'https://www.kitco.com/rss/lo/feed_news_all.rss',
+    name: 'cnbc-gold',
+    url: 'https://www.cnbc.com/id/10000664/device/rss/rss.html',
     category: 'gold' as const,
   },
   {
-    name: 'reuters-gold',
-    url: 'https://feeds.reuters.com/reuters/businessNews',
+    name: 'yahoo-finance',
+    url: 'https://finance.yahoo.com/news/rssindex',
     category: 'economic' as const,
   },
   {

@@ -190,6 +190,24 @@
               {{ stats.totalPnl >= 0 ? '+' : '' }}¥{{ stats.totalPnl.toFixed(2) }}
             </span>
           </div>
+          <!-- 浮动盈亏：实时计算，有未结持仓时显示 -->
+          <div class="bs-row" v-if="floatingPnl !== null">
+            <span class="bs-lbl float-lbl">浮动盈亏 <span class="live-dot">●</span></span>
+            <span class="bs-val" :class="floatingPnl >= 0 ? 'green' : 'red'">
+              {{ floatingPnl >= 0 ? '+' : '' }}¥{{ floatingPnl.toFixed(2) }}
+            </span>
+          </div>
+          <div class="bs-row" v-if="openAvgCost !== null && stats.openGrams > 0">
+            <span class="bs-lbl">持仓均价</span>
+            <span class="bs-val gold">¥{{ openAvgCost!.toFixed(2) }}/g × {{ stats.openGrams }}g</span>
+          </div>
+          <!-- 总盈亏 = 已实现 + 浮动 -->
+          <div class="bs-row total-pnl-row" v-if="totalPnlWithFloat !== null">
+            <span class="bs-lbl"><b>总盈亏</b></span>
+            <span class="bs-val total-pnl" :class="totalPnlWithFloat >= 0 ? 'green' : 'red'">
+              {{ totalPnlWithFloat >= 0 ? '+' : '' }}¥{{ totalPnlWithFloat.toFixed(2) }}
+            </span>
+          </div>
           <div class="bs-row">
             <span class="bs-lbl">总手续费</span>
             <span class="bs-val red">-¥{{ stats.totalFee.toFixed(2) }}</span>
@@ -238,6 +256,8 @@ interface Stats {
   buyCnt: number; buyTotalAmount: number; buyTotalGrams: number;
   sellCnt: number; sellTotalAmount: number; sellTotalGrams: number;
   totalFee: number;
+  // 未结持仓成本（后端返回，用于前端实时计算浮动盈亏）
+  openGrams: number; openCostBasis: number; openFee: number;
 }
 
 const entries  = ref<Entry[]>([]);
@@ -250,6 +270,25 @@ const aiLoading  = ref(false);
 const aiResult   = ref('');
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+
+// ── 实时浮动盈亏（随 currentPrice prop 自动更新）──────────────
+const floatingPnl = computed(() => {
+  if (!stats.value || !currentPrice.value) return null;
+  const { openGrams, openCostBasis, openFee } = stats.value;
+  if (!openGrams || openGrams <= 0) return null;
+  const avgCost = openCostBasis / openGrams;
+  return (currentPrice.value - avgCost) * openGrams - openFee;
+});
+const openAvgCost = computed(() => {
+  if (!stats.value?.openGrams) return null;
+  return stats.value.openCostBasis / stats.value.openGrams;
+});
+const totalPnlWithFloat = computed(() => {
+  if (!stats.value) return null;
+  const realized = stats.value.totalPnl;
+  const floating = floatingPnl.value ?? 0;
+  return realized + floating;
+});
 
 const form = reactive({
   type: 'buy' as 'buy' | 'sell',
@@ -574,6 +613,16 @@ label       { font-size: 10px; color: #666; }
 .bs-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .bs-lbl { font-size: 10px; color: #555; flex-shrink: 0; }
 .bs-val { font-size: 12px; color: #bbb; font-weight: 500; text-align: right; }
+.bs-val.gold { color: #D4AF37; }
+
+/* 浮动盈亏实时标识 */
+.float-lbl { display: flex; align-items: center; gap: 3px; }
+.live-dot { color: #00C853; font-size: 7px; animation: blink 1.4s ease-in-out infinite; }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+/* 总盈亏行加粗突出 */
+.total-pnl-row { border-top: 1px solid #2a2a4a; padding-top: 4px; margin-top: 2px; }
+.total-pnl { font-size: 14px !important; font-weight: 800 !important; }
 
 /* ── 分页 ── */
 .pagination {

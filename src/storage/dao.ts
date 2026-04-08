@@ -929,6 +929,16 @@ export function getJournalStats(): Record<string, unknown> {
      FROM trade_journal WHERE type='sell'`
   ).get() as { cnt: number; total_amount: number; total_grams: number; total_fee: number };
 
+  // 未结持仓：买入但尚未配对卖出的记录
+  const openRow = db.prepare(
+    `SELECT COALESCE(SUM(grams), 0) AS open_grams,
+            COALESCE(SUM(price_cny_g * grams), 0) AS open_cost,
+            COALESCE(SUM(fee), 0) AS open_fee
+     FROM trade_journal
+     WHERE type = 'buy'
+       AND id NOT IN (SELECT pair_id FROM trade_journal WHERE pair_id IS NOT NULL)`
+  ).get() as { open_grams: number; open_cost: number; open_fee: number };
+
   const wins     = sells.filter(r => r.pnl > 0);
   const losses   = sells.filter(r => r.pnl <= 0);
   const totalPnl = sells.reduce((s, r) => s + r.pnl, 0);
@@ -955,6 +965,10 @@ export function getJournalStats(): Record<string, unknown> {
     sellTotalGrams:  Math.round((sellRow.total_grams ?? 0) * 1000) / 1000,
     // 总手续费
     totalFee:        Math.round(totalFee * 100) / 100,
+    // 未结持仓成本（用于前端实时计算浮动盈亏）
+    openGrams:       Math.round((openRow.open_grams ?? 0) * 1000) / 1000,
+    openCostBasis:   Math.round((openRow.open_cost  ?? 0) * 100)  / 100,
+    openFee:         Math.round((openRow.open_fee   ?? 0) * 100)  / 100,
   };
 }
 

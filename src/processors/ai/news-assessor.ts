@@ -3,17 +3,34 @@
  * 批量评估新闻对金价的影响方向和强度
  */
 import { callClaude } from './claude-client';
-import { getPendingAINews, updateNewsAI } from '../../storage/dao';
+import { getPendingAINews, updateNewsAI, resetSkippedNews } from '../../storage/dao';
 import logger from '../../utils/logger';
 import type { IAINewsAssessment } from '../../types';
 
 // T-306: 关键词预过滤 — 低相关性新闻跳过AI评估
 const GOLD_RELEVANT_KEYWORDS = [
-  'gold', 'xau', 'bullion', 'precious metal', 'silver', 'comex',
-  'federal reserve', 'fed', 'powell', 'rate', 'inflation', 'cpi',
-  'dollar', 'usd', 'tariff', 'trump', 'china', 'war', 'conflict',
-  'etf', 'gld', 'iau', 'central bank', 'treasury', 'yield',
+  // 贵金属直接
+  'gold', 'xau', 'bullion', 'precious metal', 'silver', 'comex', 'spot gold',
+  // 货币政策
+  'federal reserve', 'fed', 'powell', 'rate', 'inflation', 'cpi', 'fomc',
+  'interest rate', 'monetary', 'quantitative',
+  // 美元/汇率
+  'dollar', 'usd', 'currency', 'dxy',
+  // 贸易/制裁
+  'tariff', 'sanction', 'trade war', 'trade deal',
+  // 地缘政治（核心扩充）
+  'trump', 'china', 'war', 'conflict', 'iran', 'israel', 'russia', 'ukraine',
+  'ceasefire', 'attack', 'strike', 'military', 'geopolitic', 'tension',
+  'strait', 'hormuz', 'shipping', 'blockade', 'embargo',
+  // 能源（油价与黄金强相关）
+  'oil', 'crude', 'opec', 'energy', 'petroleum',
+  // 资金流/ETF
+  'etf', 'gld', 'iau', 'central bank', 'treasury', 'yield', 'bond',
+  // 中文关键词
   '黄金', '美联储', '利率', '通胀', '美元', '贸易战',
+  '伊朗', '以色列', '俄罗斯', '乌克兰', '停火', '军事', '制裁',
+  '霍尔木兹', '海峡', '石油', '原油', '地缘', '冲突', '战争',
+  '中央银行', '美债', '国债',
 ];
 
 function isGoldRelevant(title: string, summary?: string): boolean {
@@ -79,6 +96,12 @@ export async function assessPendingNews(
   currentPrice: number,
   marketContext = ''
 ): Promise<number> {
+  // 重置过去 6h 内被关键词过滤器错误跳过的新闻，让扩充后的关键词重新覆盖
+  const resetCount = resetSkippedNews(6);
+  if (resetCount > 0) {
+    logger.info(`[news-assessor] reset ${resetCount} previously-skipped news for re-assessment`);
+  }
+
   const pending = getPendingAINews(20);
   logger.info(`[news-assessor] ${pending.length} pending news items`);
 

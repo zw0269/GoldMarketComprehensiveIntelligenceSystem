@@ -220,6 +220,24 @@ export function getPendingAINews(limit = 20): Record<string, unknown>[] {
   ).all(limit) as Record<string, unknown>[];
 }
 
+/**
+ * 重置被关键词过滤器错误跳过的新闻，使其重新进入评估队列。
+ * 只重置过去 windowHours 小时内、reasoning 为"非相关"标记的记录。
+ */
+export function resetSkippedNews(windowHours = 24): number {
+  const since = Date.now() - windowHours * 3600 * 1000;
+  const result = getDB().prepare(`
+    UPDATE news
+    SET ai_direction = NULL, ai_impact = NULL, ai_reasoning = NULL, ai_timeframe = NULL
+    WHERE ts >= ?
+      AND ai_reasoning IN (
+        'Not directly relevant to gold market',
+        'Duplicate article from another RSS source'
+      )
+  `).run(since);
+  return result.changes;
+}
+
 export function updateNewsAI(
   id: number,
   direction: string,

@@ -2,7 +2,7 @@
 
 > 项目：黄金市场全景情报系统（积存金短线交易辅助）
 > 技术栈：Node.js + TypeScript + SQLite + Vue 3 + ECharts + Claude API
-> 最后更新：2026-04-07（会话15）
+> 最后更新：2026-04-09（会话16）
 
 ---
 
@@ -273,6 +273,33 @@ CREATE TABLE ai_interaction_log (
 - **邮件**：HTML模板，含彩色变动百分比大字体、价格前后对比表、风险提示文字
 
 **运营说明：** 此监控与每1分钟的价格采集共用数据库记录，无额外 API 调用，资源消耗极低。
+
+---
+
+### 会话 16 — 2026-04-09：推送优化 + AI分析上下文增强
+
+**用户需求：**
+1. 去除 52 周新高/新低的钉钉推送
+2. 积存金交易信号**任意变化**时立即推送钉钉（含 HOLD），并附完整理由
+3. 每次 AI 分析时结合：实时价格、7日历史价格、近期新闻、宏观指标、交易策略备忘录
+4. log.md 更新，git 推送
+
+| 操作 | 涉及文件 | 说明 |
+|------|---------|------|
+| 去除 52W 推送 | `src/processors/alert/price-level-monitor.ts` | `check52WeekBreakout()` 改为仅记录 logger，移除 `sendDingTalkBrief` 调用及 import |
+| 信号变化推送 | `src/scheduler/scheduler.ts` | `scheduleSignalMonitor()` 改为：信号变化时立即推送（含 HOLD），4小时后对非 HOLD 信号发重复提醒；推送内容增加"信号变化"描述和时间戳 |
+| 新闻评估上下文 | `src/scheduler/scheduler.ts` | 每小时调用 `assessPendingNews` 时构建富上下文（24h涨跌幅、DXY、US10Y、VIX、USD/CNY、系统信号、7日CNY趋势）传入 `marketContext` |
+| 复合告警 AI 增强 | `src/processors/monitor/composite-alert.ts` | ALARM 状态 AI prompt 加入：7日历史价格走势、30min实时走势、3小时内 impact≥3 新闻、宏观指标、交易纪律框架 |
+| 综合日报增强 | `src/processors/ai/comprehensive-summary.ts` | 历史数据从 2 天扩展到 30 天；prompt 加入 7日走势、30日高低区间、策略备忘录（STRATEGY_MEMO.md 前 800 字） |
+
+**推送逻辑变化对比：**
+
+| 场景 | 旧逻辑 | 新逻辑 |
+|------|--------|--------|
+| 52W 新高/新低 | 📣 钉钉推送 | ❌ 仅 logger，不推送 |
+| BUY/SELL 信号 | 同信号 2h 内不重复 | 信号变化立即推，4h 后可重推 |
+| HOLD 信号 | ❌ 不推送 | ✅ 从非 HOLD 变为 HOLD 时推送 |
+| AI 分析上下文 | 仅当前价格 | 实时价+历史走势+新闻+宏观+策略 |
 
 ---
 

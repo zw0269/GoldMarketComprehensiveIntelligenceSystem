@@ -96,6 +96,7 @@ export function scheduleEveryMinute() {
         const { getYesterdayCloseCny } = await import('../storage/dao');
         const yesterdayClose = getYesterdayCloseCny();
 
+        // check52WeekBreakout 只记录日志，不推送钉钉
         await Promise.allSettled([
           checkIntegerLevelCross(agg.xauCny, prevCny),
           check52WeekBreakout(agg.xauCny),
@@ -178,7 +179,32 @@ export function scheduleEveryHour() {
 
       // AI 评估（仅交易日执行，休市时跳过）
       if (isMarketOpen() && (config.api.anthropicKey || config.api.aiCustomBaseUrl) && lastPrice) {
-        await assessPendingNews(lastPrice);
+        // 构建富含上下文的市场背景，供 AI 评估参考
+        const { getPriceHistory: getPH, getMacroDashboard: getMacro, getLatestSignal: getSig, getDailyOHLCV: getDayOHLC } = await import('../storage/dao');
+        const recentMinutes = getPH(Date.now() - 24 * 3600_000, Date.now(), 24) as Array<Record<string, number>>;
+        const macro = getMacro() as Record<string, unknown>;
+        const latestSig = getSig() as Record<string, unknown> | null;
+        const dayBars = getDayOHLC(7) as Array<Record<string, unknown>>;
+
+        const price24hAgo = recentMinutes.length > 0 ? recentMinutes[0]['xau_usd'] as number : null;
+        const change24h = price24hAgo ? ((lastPrice - price24hAgo) / price24hAgo * 100) : null;
+
+        // 7日价格趋势摘要
+        const priceTrend7d = dayBars.slice(0, 7).reverse()
+          .map(d => `${d['date']} ¥${d['xau_cny_g'] ?? d['close_cny_g'] ?? 'N/A'}/g`)
+          .join(', ');
+
+        const marketContext = [
+          `XAU/USD: $${lastPrice.toFixed(2)}${change24h !== null ? ` (24h: ${change24h >= 0 ? '+' : ''}${change24h.toFixed(2)}%)` : ''}`,
+          macro['dxy']   ? `DXY: ${macro['dxy']}` : '',
+          macro['us10y'] ? `US10Y: ${macro['us10y']}%` : '',
+          macro['vix']   ? `VIX: ${macro['vix']}` : '',
+          macro['usd_cny'] ? `USD/CNY: ${macro['usd_cny']}` : '',
+          latestSig ? `System Signal: ${latestSig['signal']} (score: ${latestSig['score']}, conf: ${latestSig['confidence']}%)` : '',
+          priceTrend7d ? `7-day CNY trend: ${priceTrend7d}` : '',
+        ].filter(Boolean).join(' | ');
+
+        await assessPendingNews(lastPrice, marketContext);
       }
 
       logger.info('[scheduler] hourly news cycle done', { newsCount: allNews.length });
@@ -208,12 +234,25 @@ export function scheduleDailyInventory() {
 // ── 每日 22:00：AI 市场日报 ──────────────────────────────────
 export function scheduleDailyBrief() {
   return cron.schedule('0 22 * * *', async () => {
-    if (!config.api.anthropicKey) return;
+    if (!config.api.anthropicKey && !config.api.aiCustomBaseUrl) return;
     try {
       const brief = await generateDailyBrief();
       await pushDailyBrief(brief);
     } catch (err) {
       logger.error('[scheduler] daily brief failed', { err });
+    }
+  });
+}
+
+// ── 每日 22:30：Agent 成长日报（自我反思 + 准确率 + 约束进化） ──
+export function scheduleAgentDailyReport() {
+  return cron.schedule('30 22 * * *', async () => {
+    if (!config.api.anthropicKey && !config.api.aiCustomBaseUrl) return;
+    try {
+      const { marketMonitorAgent } = await import('../agents/market-monitor-agent');
+      await marketMonitorAgent.generateDailyGrowthReport();
+    } catch (err) {
+      logger.error('[scheduler] agent daily report failed', { err });
     }
   });
 }
@@ -246,10 +285,12 @@ export function scheduleSignalMonitor() {
       const price  = getLatestPrice() as Record<string, number> | null;
       const cnyG   = price?.['xau_cny_g'] ?? 0;
 
-      // 只有 STRONG_BUY / STRONG_SELL / BUY / SELL 才推送，且同一信号2小时内不重复
-      const shouldPush = (signal.signal === 'STRONG_BUY' || signal.signal === 'STRONG_SELL' ||
-                          signal.signal === 'BUY'         || signal.signal === 'SELL') &&
-        (signal.signal !== alertState.lastSignal || Date.now() - alertState.lastSignalTs > 2 * 3600_000);
+      const prevSignal = alertState.lastSignal;
+      const signalChanged = signal.signal !== prevSignal;
+
+      // 信号发生变化时立即推送；相同信号4小时后可再次推送（提醒）
+      const shouldPush = signalChanged ||
+        (signal.signal !== 'HOLD' && Date.now() - alertState.lastSignalTs > 4 * 3600_000);
 
       if (!shouldPush) return;
 
@@ -258,13 +299,20 @@ export function scheduleSignalMonitor() {
 
       const LABELS: Record<string, string> = {
         STRONG_BUY: '🟢 强烈买入', BUY: '🟢 建议买入',
+        HOLD: '🟡 持续观望',
         SELL: '🔴 建议减仓',       STRONG_SELL: '🔴 强烈减仓',
       };
       const label = LABELS[signal.signal] ?? signal.signal;
 
-      // 钉钉推送
+      // 信号变化描述（若是首次则不显示"从...变为"）
+      const changeDesc = signalChanged && prevSignal
+        ? `**信号变化**: ${LABELS[prevSignal] ?? prevSignal} → **${label}**`
+        : `**信号确认**: ${label}`;
+
+      // 钉钉推送（任何信号变化均推送，含 HOLD，并附完整理由）
       const ddContent = [
         `## ${label}`,
+        changeDesc,
         `**当前价格**: ¥${cnyG.toFixed(2)}/g`,
         signal.entry_cny_g    ? `**建议入场**: ¥${signal.entry_cny_g}/g` : '',
         signal.stop_loss      ? `**止损价位**: ¥${signal.stop_loss}/g` : '',
@@ -275,9 +323,10 @@ export function scheduleSignalMonitor() {
         ...signal.reasons.map(r => `- ${r}`),
         '',
         `> 置信度 ${signal.confidence}% · 综合评分 ${signal.score > 0 ? '+' : ''}${signal.score}`,
+        `> ${new Date().toLocaleString('zh-CN')} · Gold Sentinel`,
       ].filter(Boolean).join('\n');
 
-      await sendDingTalkBrief(`Gold Sentinel ${label}`, ddContent);
+      await sendDingTalkBrief(`Gold Sentinel ${label}${signalChanged && prevSignal ? ` (从${prevSignal}变化)` : ''}`, ddContent);
 
       // 邮件推送
       await sendSignalEmail({
@@ -503,19 +552,56 @@ export function schedulePriceSpikeMonitor() {
   });
 }
 
-// ── 每日 02:00：AI 提示词归纳总结分析 ────────────────────────
+// ── 每日 02:00：综合日报 + 回测分析 + AI 自我进步 ─────────────
 export function scheduleAIDailySummary() {
   return cron.schedule('0 2 * * *', async () => {
+    const dateStr = new Date().toLocaleDateString('zh-CN');
     try {
-      const { generateAIDailySummary } = await import('../processors/ai/ai-summary');
-      const summary = await generateAIDailySummary();
-      if (summary) {
-        logger.info('[scheduler] AI daily summary generated', { length: summary.length });
-        // 推送总结
-        await pushDailyBrief(`【AI 提示词日报 ${new Date().toLocaleDateString('zh-CN')}】\n\n${summary}`);
+      // Step 1: 先补录昨日信号回测结果（确保02:00时数据最新）
+      const { recordSignalOutcomes, generateBacktestSummary } = await import('../processors/ai/backtester');
+      await recordSignalOutcomes();
+      const btSummary = await generateBacktestSummary();
+      if (btSummary) logger.info('[scheduler] backtest summary generated');
+
+      // Step 2: 生成综合日报（含自我进步）
+      const { generateComprehensiveSummary } = await import('../processors/ai/comprehensive-summary');
+      const report = await generateComprehensiveSummary();
+      if (report) {
+        logger.info('[scheduler] comprehensive summary generated', { length: report.length });
+        await pushDailyBrief(`【Gold Sentinel 综合日报 ${dateStr}】\n\n${report}`);
       }
+
+      // Step 3: 保留原有 AI 提示词归纳（作为补充）
+      const { generateAIDailySummary } = await import('../processors/ai/ai-summary');
+      await generateAIDailySummary();
     } catch (err) {
-      logger.error('[scheduler] AI daily summary failed', { err });
+      logger.error('[scheduler] comprehensive daily summary failed', { err });
+    }
+  });
+}
+
+// ── 每30分钟：信号回测结果记录 ───────────────────────────────
+export function scheduleBacktestOutcomes() {
+  return cron.schedule('*/30 * * * *', async () => {
+    try {
+      const { recordSignalOutcomes } = await import('../processors/ai/backtester');
+      const count = await recordSignalOutcomes();
+      if (count > 0) logger.info('[scheduler] backtest outcomes recorded', { count });
+    } catch (err) {
+      logger.error('[scheduler] backtest outcomes failed', { err });
+    }
+  });
+}
+
+// ── 每5分钟：多因子复合告警 ──────────────────────────────────
+export function scheduleCompositeAlert() {
+  return cron.schedule('*/5 * * * *', async () => {
+    if (!isMarketOpen()) return;
+    try {
+      const { runCompositeAlert } = await import('../processors/monitor/composite-alert');
+      await runCompositeAlert();
+    } catch (err) {
+      logger.error('[scheduler] composite alert failed', { err });
     }
   });
 }
@@ -775,7 +861,10 @@ export function startAllSchedulers(): cron.ScheduledTask[] {
     scheduleMorningReport(),    // 每日08:30 早安黄金播报
     scheduleWeeklyOutlook(),    // 每周一09:00 周度展望
     ...scheduleIntradayBrief(), // 09:30/13:30/21:30 盘中快报
-    scheduleIntelCollectors(),  // 每30分钟前瞻指标（披萨指数+Polymarket）
+    scheduleIntelCollectors(),   // 每30分钟前瞻指标（披萨指数+Polymarket）
+    scheduleBacktestOutcomes(),  // 每30分钟信号回测结果记录
+    scheduleCompositeAlert(),    // 每5分钟多因子复合告警
+    scheduleAgentDailyReport(),  // 每日22:30 Agent成长日报（自我反思+准确率+约束进化）
   ];
   logger.info('[scheduler] all tasks started', { count: tasks.length });
   return tasks;

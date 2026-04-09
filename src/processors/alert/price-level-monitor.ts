@@ -10,7 +10,6 @@
  *
  * 所有规则均内置冷却机制，防止同一事件重复推送。
  */
-import { sendDingTalkBrief } from '../../push/dingtalk';
 import logger from '../../utils/logger';
 
 // ── 冷却时间表（同一关键位触发后多少毫秒内不再推送）───────────
@@ -117,58 +116,27 @@ export async function checkIntegerLevelCross(
   }
 }
 
-// ── 2. 52周高低点突破检测 ───────────────────────────────────────
+// ── 2. 52周高低点突破检测（仅记录日志，不推送钉钉）──────────────
 export async function check52WeekBreakout(cnyNow: number): Promise<void> {
   const hl = await get52WHL();
   if (!hl) return;
 
-  // 年内新高
+  // 年内新高（仅日志，不推送）
   if (cnyNow > hl.high) {
-    const key = `52W_HIGH_${Math.floor(cnyNow / 5) * 5}`; // 每突破5元才算新高
+    const key = `52W_HIGH_${Math.floor(cnyNow / 5) * 5}`;
     if (!isCooled(key, COOLDOWNS.high52w)) {
       setCooled(key);
-      const upPct = ((cnyNow - hl.high) / hl.high * 100).toFixed(2);
-      const content = [
-        `## 🏆 黄金创52周新高！`,
-        '',
-        `| | 价格 |`,
-        `|--|--|`,
-        `| 当前价格 | **¥${cnyNow.toFixed(2)}/g** |`,
-        `| 52周前高 | ¥${hl.high.toFixed(2)}/g |`,
-        `| 超越幅度 | +¥${(cnyNow - hl.high).toFixed(2)}/g (+${upPct}%) |`,
-        '',
-        '> 🚀 **价格创年内新高，强势趋势确认。** 追高有风险，建议等待短线回调后再布局；已持仓者可适当上移止损保护利润。',
-        '',
-        `> ${new Date().toLocaleString('zh-CN')} · Gold Sentinel`,
-      ].join('\n');
-      await sendDingTalkBrief('🏆 黄金创52周新高', content);
-      logger.info('[level-monitor] 52W high breakout', { cnyNow, prev52wHigh: hl.high });
-      // 刷新缓存（新高已经改变了52周范围）
+      logger.info('[level-monitor] 52W high breakout (no push)', { cnyNow, prev52wHigh: hl.high });
       _52wCache = null;
     }
   }
 
-  // 年内新低
+  // 年内新低（仅日志，不推送）
   if (cnyNow < hl.low) {
     const key = `52W_LOW_${Math.ceil(cnyNow / 5) * 5}`;
     if (!isCooled(key, COOLDOWNS.low52w)) {
       setCooled(key);
-      const downPct = ((hl.low - cnyNow) / hl.low * 100).toFixed(2);
-      const content = [
-        `## 📉 黄金创52周新低！`,
-        '',
-        `| | 价格 |`,
-        `|--|--|`,
-        `| 当前价格 | **¥${cnyNow.toFixed(2)}/g** |`,
-        `| 52周前低 | ¥${hl.low.toFixed(2)}/g |`,
-        `| 跌幅     | -¥${(hl.low - cnyNow).toFixed(2)}/g (-${downPct}%) |`,
-        '',
-        '> ⚠️ **价格创年内新低，下行趋势确立。** 持仓者立即检查止损位，空仓者等待企稳信号，切勿盲目抄底。',
-        '',
-        `> ${new Date().toLocaleString('zh-CN')} · Gold Sentinel`,
-      ].join('\n');
-      await sendDingTalkBrief('📉 黄金创52周新低', content);
-      logger.info('[level-monitor] 52W low breakout', { cnyNow, prev52wLow: hl.low });
+      logger.info('[level-monitor] 52W low breakout (no push)', { cnyNow, prev52wLow: hl.low });
       _52wCache = null;
     }
   }
